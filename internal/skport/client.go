@@ -24,6 +24,8 @@ const (
 	maxBodyBytes   = 1 << 20
 	maxAttempts    = 3
 	requestLimit   = 5
+	platform       = "3"
+	clientVersion  = "1.0.0"
 )
 
 type ErrorKind string
@@ -113,7 +115,7 @@ func New(account config.Account, timeout time.Duration, options Options) *Client
 
 func (c *Client) Refresh(ctx context.Context) (string, error) {
 	var response RefreshResponse
-	if err := c.retry(ctx, http.MethodGet, RefreshPath, func() http.Header { return refreshHeaders(c.account) }, "", 2, &response); err != nil {
+	if err := c.retry(ctx, http.MethodGet, RefreshPath, func() http.Header { return commonHeaders(c.account) }, "", 2, &response); err != nil {
 		return "", err
 	}
 	if response.Code != 0 {
@@ -269,18 +271,13 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 	return nil
 }
 
-func refreshHeaders(account config.Account) http.Header {
-	headers := commonHeaders(account)
-	return headers
-}
-
 func commonHeaders(account config.Account) http.Header {
 	return http.Header{
 		"Accept":       []string{"*/*"},
 		"Content-Type": []string{"application/json"},
-		"Cred":         []string{account.Cred.Expose()},
-		"Platform":     []string{config.Platform},
-		"Vname":        []string{config.VName},
+		"Cred":         []string{account.Credential.Expose()},
+		"Platform":     []string{platform},
+		"Vname":        []string{clientVersion},
 		"Origin":       []string{"https://game.skport.com"},
 		"Referer":      []string{"https://game.skport.com/"},
 	}
@@ -292,7 +289,7 @@ func signedHeaders(account config.Account, token, path, body string, now time.Ti
 	headers.Set("sk-language", account.Language)
 	headers.Set("sk-game-role", account.GameRole.Expose())
 	headers.Set("timestamp", timestamp)
-	headers.Set("sign", GenerateSign(path, body, timestamp, token, config.Platform, config.VName))
+	headers.Set("sign", GenerateSign(path, body, timestamp, token, platform, clientVersion))
 	return headers
 }
 

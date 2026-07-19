@@ -91,7 +91,7 @@ func TestSecretNeverFormatsPlaintext(t *testing.T) {
 func TestValidateLanguage(t *testing.T) {
 	cfg := defaults()
 	cfg.Version = 1
-	cfg.Accounts = []Account{{Name: "main", Enabled: true, Cred: NewSecret("x"), GameRole: NewSecret("y"), Language: "bad language"}}
+	cfg.Accounts = []Account{{Name: "main", Enabled: true, Credential: NewSecret("x"), GameRole: NewSecret("y"), Language: "bad language"}}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected language validation failure")
 	}
@@ -100,7 +100,7 @@ func TestValidateLanguage(t *testing.T) {
 func TestValidateRejectsWhitespaceOnlySecrets(t *testing.T) {
 	cfg := defaults()
 	cfg.Version = 1
-	cfg.Accounts = []Account{{Name: "main", Enabled: true, Cred: NewSecret(" \t "), GameRole: NewSecret("role")}}
+	cfg.Accounts = []Account{{Name: "main", Enabled: true, Credential: NewSecret(" \t "), GameRole: NewSecret("role")}}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "requires cred") {
 		t.Fatalf("expected empty credential error, got %v", err)
 	}
@@ -110,19 +110,19 @@ func TestValidateTrimsCopiedHeaderValuesAndRejectsHeaderInjection(t *testing.T) 
 	cfg := defaults()
 	cfg.Version = 1
 	cfg.Accounts = []Account{{
-		Name:     "main",
-		Enabled:  true,
-		Cred:     NewSecret("  credential-secret  "),
-		GameRole: NewSecret("\trole-secret\t"),
+		Name:       "main",
+		Enabled:    true,
+		Credential: NewSecret("  credential-secret  "),
+		GameRole:   NewSecret("\trole-secret\t"),
 	}}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Accounts[0].Cred.Expose() != "credential-secret" || cfg.Accounts[0].GameRole.Expose() != "role-secret" {
-		t.Fatalf("copied header values were not normalized: cred=%q role=%q", cfg.Accounts[0].Cred.Expose(), cfg.Accounts[0].GameRole.Expose())
+	if cfg.Accounts[0].Credential.Expose() != "credential-secret" || cfg.Accounts[0].GameRole.Expose() != "role-secret" {
+		t.Fatalf("copied header values were not normalized: cred=%q role=%q", cfg.Accounts[0].Credential.Expose(), cfg.Accounts[0].GameRole.Expose())
 	}
 
-	cfg.Accounts[0].Cred = NewSecret("credential\r\nInjected: value")
+	cfg.Accounts[0].Credential = NewSecret("credential\r\nInjected: value")
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "control character") {
 		t.Fatalf("expected header control-character rejection, got %v", err)
 	}
@@ -131,7 +131,7 @@ func TestValidateTrimsCopiedHeaderValuesAndRejectsHeaderInjection(t *testing.T) 
 func TestRejectsDuplicateNotificationNames(t *testing.T) {
 	cfg := defaults()
 	cfg.Version = 1
-	cfg.Accounts = []Account{{Name: "main", Enabled: true, Cred: NewSecret("x"), GameRole: NewSecret("y")}}
+	cfg.Accounts = []Account{{Name: "main", Enabled: true, Credential: NewSecret("x"), GameRole: NewSecret("y")}}
 	cfg.Notifications.Targets = []NotificationTarget{{Name: "same", Type: "telegram", BotToken: NewSecret("x"), ChatID: NewSecret("y")}, {Name: "same", Type: "ntfy", Server: "https://ntfy.sh", Topic: "safe"}}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate notification") {
 		t.Fatalf("expected duplicate target error, got %v", err)
@@ -177,7 +177,7 @@ func TestEmbeddedExampleMatchesRepositoryFile(t *testing.T) {
 func TestValidateRejectsControlCharactersAndExcessiveRandomDelay(t *testing.T) {
 	cfg := defaults()
 	cfg.Version = 1
-	cfg.Accounts = []Account{{Name: "main\nforged", Enabled: true, Cred: NewSecret("x"), GameRole: NewSecret("y")}}
+	cfg.Accounts = []Account{{Name: "main\nforged", Enabled: true, Credential: NewSecret("x"), GameRole: NewSecret("y")}}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "control") {
 		t.Fatalf("expected control-character error, got %v", err)
 	}

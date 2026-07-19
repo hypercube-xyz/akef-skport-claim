@@ -1,4 +1,5 @@
-package model
+// Package result defines the outcome of one application run.
+package result
 
 import (
 	"strconv"
@@ -20,9 +21,9 @@ const (
 )
 
 type Reward struct {
-	ID    string  `json:"id,omitempty"`
-	Name  string  `json:"name"`
-	Count *uint64 `json:"count,omitempty"`
+	ID    string
+	Name  string
+	Count *uint64
 }
 
 func (r Reward) Summary() string {
@@ -32,14 +33,14 @@ func (r Reward) Summary() string {
 	return r.Name + " x" + strconv.FormatUint(*r.Count, 10)
 }
 
-type AccountResult struct {
-	Account string
+type Account struct {
+	Name    string
 	Outcome Outcome
 	Summary string
 	Rewards []Reward
 }
 
-type RunReport struct {
+type Run struct {
 	Duration time.Duration
-	Results  []AccountResult
+	Accounts []Account
 }

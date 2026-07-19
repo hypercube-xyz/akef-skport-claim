@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
-	"github.com/hypercube-xyz/akef-skport-claim/internal/model"
+	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/state"
 )
 
@@ -57,8 +57,8 @@ func TestFailedTargetDoesNotStopLaterTargetAndDeduplicatesErrors(t *testing.T) {
 		{Name: "bad", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL + "/fail"), Events: []string{"error"}},
 		{Name: "good", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL + "/good"), Events: []string{"error"}},
 	}}}
-	runReport := model.RunReport{Results: []model.AccountResult{{Account: "main", Outcome: model.TransientError}}}
-	stateFile := &state.File{Notifications: map[string]time.Time{}}
+	runReport := result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.TransientError}}}
+	stateFile := &state.Store{Notifications: map[string]time.Time{}}
 	errs := sender.SendAll(context.Background(), cfg, runReport, stateFile)
 	if len(errs) != 1 || success.Load() != 1 {
 		t.Fatalf("errs=%v success=%d", errs, success.Load())
@@ -107,10 +107,10 @@ func TestRecentErrorDoesNotSuppressClaimedEvent(t *testing.T) {
 	cfg := &config.Config{Run: config.RunConfig{NotificationErrorCooldown: config.Duration{Duration: time.Hour}}, Notifications: config.Notifications{Targets: []config.NotificationTarget{{
 		Name: "mixed", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"claimed", "error"},
 	}}}}
-	stateFile := &state.File{Notifications: map[string]time.Time{dedupKey("mixed", "main", "error"): now.Add(-time.Minute)}}
-	runReport := model.RunReport{Results: []model.AccountResult{
-		{Account: "main", Outcome: model.TransientError},
-		{Account: "secondary", Outcome: model.Claimed},
+	stateFile := &state.Store{Notifications: map[string]time.Time{dedupKey("mixed", "main", "error"): now.Add(-time.Minute)}}
+	runReport := result.Run{Accounts: []result.Account{
+		{Name: "main", Outcome: result.TransientError},
+		{Name: "secondary", Outcome: result.Claimed},
 	}}
 	if errs := sender.SendAll(context.Background(), cfg, runReport, stateFile); len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -133,9 +133,9 @@ func TestErrorOutcomesShareDeduplicationCategory(t *testing.T) {
 	cfg := &config.Config{Run: config.RunConfig{NotificationErrorCooldown: config.Duration{Duration: time.Hour}}, Notifications: config.Notifications{Targets: []config.NotificationTarget{{
 		Name: "errors", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"error"},
 	}}}}
-	stateFile := &state.File{Notifications: map[string]time.Time{}}
-	for _, outcome := range []model.Outcome{model.TransientError, model.InternalError} {
-		runReport := model.RunReport{Results: []model.AccountResult{{Account: "main", Outcome: outcome}}}
+	stateFile := &state.Store{Notifications: map[string]time.Time{}}
+	for _, outcome := range []result.Outcome{result.TransientError, result.InternalError} {
+		runReport := result.Run{Accounts: []result.Account{{Name: "main", Outcome: outcome}}}
 		if errs := sender.SendAll(context.Background(), cfg, runReport, stateFile); len(errs) != 0 {
 			t.Fatalf("unexpected errors: %v", errs)
 		}

@@ -9,11 +9,11 @@ import (
 
 func TestSaveReplacesStateAndLoadInitializesMap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	first := &File{Notifications: map[string]time.Time{"old": time.Unix(10, 0)}}
+	first := &Store{Notifications: map[string]time.Time{"old": time.Unix(10, 0)}}
 	if err := first.Save(path); err != nil {
 		t.Fatal(err)
 	}
-	second := &File{Notifications: map[string]time.Time{"new": time.Unix(20, 0)}}
+	second := &Store{Notifications: map[string]time.Time{"new": time.Unix(20, 0)}}
 	if err := second.Save(path); err != nil {
 		t.Fatal(err)
 	}
@@ -31,12 +31,12 @@ func TestSaveReplacesStateAndLoadInitializesMap(t *testing.T) {
 
 func TestRecentRejectsFutureAndExpiredTimestamps(t *testing.T) {
 	now := time.Unix(100, 0)
-	file := &File{Notifications: map[string]time.Time{
+	store := &Store{Notifications: map[string]time.Time{
 		"recent": now.Add(-time.Minute),
 		"future": now.Add(time.Minute),
 		"old":    now.Add(-2 * time.Hour),
 	}}
-	if !file.Recent("recent", now, time.Hour) || file.Recent("future", now, time.Hour) || file.Recent("old", now, time.Hour) {
+	if !store.Recent("recent", now, time.Hour) || store.Recent("future", now, time.Hour) || store.Recent("old", now, time.Hour) {
 		t.Fatal("cooldown classification is incorrect")
 	}
 }

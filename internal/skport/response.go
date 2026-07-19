@@ -5,14 +5,13 @@ import (
 	"math"
 	"sort"
 
-	"github.com/hypercube-xyz/akef-skport-claim/internal/model"
+	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 )
 
 type APIResponse struct {
-	Code      int64           `json:"code"`
-	Message   string          `json:"message"`
-	Data      json.RawMessage `json:"data"`
-	Timestamp string          `json:"timestamp,omitempty"`
+	Code    int64           `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
 }
 
 type RefreshResponse struct {
@@ -121,24 +120,7 @@ func (r AttendanceResponse) State() AttendanceState {
 	return state
 }
 
-func (r AttendanceResponse) Available() (bool, bool) {
-	state := r.State()
-	return state.Available, state.AvailableKnown
-}
-
-func (r AttendanceResponse) Done() (bool, bool) {
-	state := r.State()
-	return state.Done, state.DoneKnown
-}
-
-func (r AttendanceResponse) HasToday() (bool, bool) {
-	state := r.State()
-	return state.HasToday, state.HasTodayKnown
-}
-
-func (r AttendanceResponse) SessionValid() bool { return r.State().SessionValid }
-
-func (r AttendanceResponse) AvailableRewards() []model.Reward {
+func (r AttendanceResponse) AvailableRewards() []result.Reward {
 	if r.State().Conflict {
 		return nil
 	}
@@ -151,7 +133,7 @@ func (r AttendanceResponse) AvailableRewards() []model.Reward {
 		keys = append(keys, id)
 	}
 	sort.Strings(keys)
-	rewards := make([]model.Reward, 0, len(keys))
+	rewards := make([]result.Reward, 0, len(keys))
 	for _, id := range keys {
 		rewards = append(rewards, rewardFromResource(resourceMap, id))
 	}
@@ -171,14 +153,14 @@ func (r ClaimResponse) Classify() ClaimClass {
 	}
 }
 
-func (r ClaimResponse) Rewards() []model.Reward {
+func (r ClaimResponse) Rewards() []result.Reward {
 	var root map[string]any
 	if json.Unmarshal(r.Data, &root) != nil {
 		return nil
 	}
 	values, _ := root["awardIds"].([]any)
 	resources := resourceInfoMap(root)
-	rewards := make([]model.Reward, 0, len(values))
+	rewards := make([]result.Reward, 0, len(values))
 	for _, value := range values {
 		id := ""
 		switch item := value.(type) {
@@ -267,8 +249,8 @@ func resourceInfoMap(value any) map[string]any {
 	return resources
 }
 
-func rewardFromResource(resources map[string]any, id string) model.Reward {
-	reward := model.Reward{ID: id, Name: id}
+func rewardFromResource(resources map[string]any, id string) result.Reward {
+	reward := result.Reward{ID: id, Name: id}
 	item, _ := resources[id].(map[string]any)
 	if name, ok := item["name"].(string); ok && name != "" {
 		reward.Name = name

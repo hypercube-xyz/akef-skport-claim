@@ -1,24 +1,17 @@
 package notify
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
-	"github.com/hypercube-xyz/akef-skport-claim/internal/model"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/report"
+	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/state"
 )
 
@@ -69,37 +62,37 @@ func New(options Options) *Sender {
 	return &Sender{httpClient: client, telegramBaseURL: strings.TrimRight(base, "/"), now: now, sleep: sleep}
 }
 
-func (s *Sender) SendAll(ctx context.Context, cfg *config.Config, runReport model.RunReport, stateFile *state.File) []error {
-	if stateFile == nil {
-		stateFile = &state.File{Notifications: map[string]time.Time{}}
+func (s *Sender) SendAll(ctx context.Context, cfg *config.Config, runReport result.Run, store *state.Store) []error {
+	if store == nil {
+		store = &state.Store{Notifications: map[string]time.Time{}}
 	}
-	if !cfg.Notifications.Aggregate && len(runReport.Results) > 1 {
+	if !cfg.Notifications.Aggregate && len(runReport.Accounts) > 1 {
 		var errs []error
-		for _, result := range runReport.Results {
+		for _, account := range runReport.Accounts {
 			single := runReport
-			single.Results = []model.AccountResult{result}
-			errs = append(errs, s.sendReport(ctx, cfg, single, stateFile)...)
+			single.Accounts = []result.Account{account}
+			errs = append(errs, s.sendReport(ctx, cfg, single, store)...)
 		}
 		return errs
 	}
-	return s.sendReport(ctx, cfg, runReport, stateFile)
+	return s.sendReport(ctx, cfg, runReport, store)
 }
 
-func (s *Sender) sendReport(ctx context.Context, cfg *config.Config, runReport model.RunReport, stateFile *state.File) []error {
+func (s *Sender) sendReport(ctx context.Context, cfg *config.Config, runReport result.Run, store *state.Store) []error {
 	text := report.Format(runReport)
 	var errs []error
 	for _, target := range cfg.Notifications.Targets {
 		if !target.Enabled {
 			continue
 		}
-		matched, hasNonDeduplicatedEvent, keys := selectEvents(target.Name, target.Events, runReport.Results)
+		matched, hasNonDeduplicatedEvent, keys := selectEvents(target.Name, target.Events, runReport.Accounts)
 		if !matched {
 			continue
 		}
 		allRecent := !hasNonDeduplicatedEvent && len(keys) > 0
 		now := s.now()
 		for _, key := range keys {
-			if !stateFile.Recent(key, now, cfg.Run.NotificationErrorCooldown.Duration) {
+			if !store.Recent(key, now, cfg.Run.NotificationErrorCooldown.Duration) {
 				allRecent = false
 				break
 			}
@@ -112,116 +105,33 @@ func (s *Sender) sendReport(ctx context.Context, cfg *config.Config, runReport m
 			continue
 		}
 		for _, key := range keys {
-			stateFile.Record(key, now)
+			store.Record(key, now)
 		}
 	}
 	return errs
 }
 
 func (s *Sender) SendTest(ctx context.Context, target config.NotificationTarget) error {
-	reportValue := model.RunReport{Duration: 10 * time.Millisecond, Results: []model.AccountResult{{Account: "test", Outcome: model.Claimed, Summary: "synthetic notification test"}}}
+	reportValue := result.Run{Duration: 10 * time.Millisecond, Accounts: []result.Account{{Name: "test", Outcome: result.Claimed, Summary: "synthetic notification test"}}}
 	return s.sendTarget(ctx, target, report.Format(reportValue))
 }
 
-func (s *Sender) sendTarget(ctx context.Context, target config.NotificationTarget, text string) error {
-	var endpoint string
-	var body []byte
-	var encodeErr error
-	headers := http.Header{}
-	switch target.Type {
-	case "discord":
-		endpoint = target.Webhook.Expose()
-		content := truncateUTF8(text, 2000)
-		body, encodeErr = json.Marshal(map[string]string{"username": "Arknights: Endfield Daily Sign-in", "content": content})
-		headers.Set("Content-Type", "application/json")
-	case "telegram":
-		endpoint = s.telegramBaseURL + "/bot" + url.PathEscape(target.BotToken.Expose()) + "/sendMessage"
-		body, encodeErr = json.Marshal(map[string]string{"chat_id": target.ChatID.Expose(), "text": truncateUTF8(text, 4096)})
-		headers.Set("Content-Type", "application/json")
-	case "ntfy":
-		u, err := url.Parse(target.Server)
-		if err != nil || u == nil {
-			return errors.New("invalid ntfy server URL")
-		}
-		u.Path = path.Join(u.Path, target.Topic)
-		endpoint = u.String()
-		body = []byte(text)
-		headers.Set("Content-Type", "text/plain; charset=utf-8")
-		if !target.Token.Empty() {
-			headers.Set("Authorization", "Bearer "+target.Token.Expose())
-		}
-	default:
-		return errors.New("unsupported notification type")
-	}
-	if encodeErr != nil {
-		return errors.New("failed to encode notification payload")
-	}
-	targetCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	return s.postWithRetry(targetCtx, endpoint, headers, body)
-}
-
-func (s *Sender) postWithRetry(ctx context.Context, endpoint string, headers http.Header, body []byte) error {
-	for attempt := 0; attempt < 2; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-		if err != nil {
-			return errors.New("failed to create request")
-		}
-		req.Header = headers.Clone()
-		response, err := s.httpClient.Do(req)
-		if response != nil {
-			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-			_ = response.Body.Close()
-		}
-		retryable := err != nil
-		if err == nil && response != nil {
-			retryable = response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500
-		}
-		if !retryable {
-			if response.StatusCode < 200 || response.StatusCode >= 300 {
-				return fmt.Errorf("HTTP %d", response.StatusCode)
-			}
-			return nil
-		}
-		if attempt == 1 {
-			if err != nil {
-				return errors.New("network request failed")
-			}
-			return fmt.Errorf("HTTP %d after retry", response.StatusCode)
-		}
-		delay := time.Second
-		if err == nil {
-			if value, parseErr := strconv.ParseInt(response.Header.Get("Retry-After"), 10, 64); parseErr == nil && value >= 0 {
-				if value >= int64(30*time.Second/time.Second) {
-					delay = 30 * time.Second
-				} else {
-					delay = time.Duration(value) * time.Second
-				}
-			}
-		}
-		if err := s.sleep(ctx, delay); err != nil {
-			return errors.New("retry interrupted")
-		}
-	}
-	return errors.New("notification retry loop failed")
-}
-
-func eventFor(outcome model.Outcome) string {
-	if outcome == model.TransientError || outcome == model.ClaimError || outcome == model.AmbiguousClaim || outcome == model.InternalError {
+func eventFor(outcome result.Outcome) string {
+	if outcome == result.TransientError || outcome == result.ClaimError || outcome == result.AmbiguousClaim || outcome == result.InternalError {
 		return "error"
 	}
 	return string(outcome)
 }
 
-func selectEvents(target string, events []string, results []model.AccountResult) (matched, hasNonDeduplicatedEvent bool, keys []string) {
-	for _, result := range results {
-		event := eventFor(result.Outcome)
+func selectEvents(target string, events []string, results []result.Account) (matched, hasNonDeduplicatedEvent bool, keys []string) {
+	for _, account := range results {
+		event := eventFor(account.Outcome)
 		if !slices.Contains(events, event) {
 			continue
 		}
 		matched = true
 		if event == "auth_expired" || event == "error" {
-			keys = append(keys, dedupKey(target, result.Account, event))
+			keys = append(keys, dedupKey(target, account.Name, event))
 			continue
 		}
 		hasNonDeduplicatedEvent = true
@@ -231,26 +141,4 @@ func selectEvents(target string, events []string, results []model.AccountResult)
 
 func dedupKey(target, account, event string) string {
 	return strconv.Itoa(len(target)) + ":" + target + strconv.Itoa(len(account)) + ":" + account + event
-}
-
-func truncateUTF8(value string, limit int) string {
-	if limit <= 0 {
-		return ""
-	}
-	if len(value) <= limit {
-		return value
-	}
-	const suffix = "…"
-	if limit < len(suffix) {
-		cut := value[:limit]
-		for !utf8.ValidString(cut) {
-			cut = cut[:len(cut)-1]
-		}
-		return cut
-	}
-	cut := value[:limit-len(suffix)]
-	for !utf8.ValidString(cut) {
-		cut = cut[:len(cut)-1]
-	}
-	return cut + suffix
 }

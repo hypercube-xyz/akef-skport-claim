@@ -10,30 +10,30 @@ import (
 	"github.com/hypercube-xyz/akef-skport-claim/internal/atomicfile"
 )
 
-type File struct {
+type Store struct {
 	Notifications map[string]time.Time `json:"notifications,omitempty"`
 }
 
-func Load(path string) (*File, error) {
-	file := &File{Notifications: map[string]time.Time{}}
+func Load(path string) (*Store, error) {
+	store := &Store{Notifications: map[string]time.Time{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return file, nil
+		return store, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
-	if err := json.Unmarshal(data, file); err != nil {
+	if err := json.Unmarshal(data, store); err != nil {
 		return nil, fmt.Errorf("decode state: %w", err)
 	}
-	if file.Notifications == nil {
-		file.Notifications = map[string]time.Time{}
+	if store.Notifications == nil {
+		store.Notifications = map[string]time.Time{}
 	}
-	return file, nil
+	return store, nil
 }
 
-func (f *File) Recent(key string, now time.Time, cooldown time.Duration) bool {
-	last, ok := f.Notifications[key]
+func (s *Store) Recent(key string, now time.Time, cooldown time.Duration) bool {
+	last, ok := s.Notifications[key]
 	if !ok {
 		return false
 	}
@@ -41,15 +41,15 @@ func (f *File) Recent(key string, now time.Time, cooldown time.Duration) bool {
 	return age >= 0 && age < cooldown
 }
 
-func (f *File) Record(key string, now time.Time) {
-	if f.Notifications == nil {
-		f.Notifications = map[string]time.Time{}
+func (s *Store) Record(key string, now time.Time) {
+	if s.Notifications == nil {
+		s.Notifications = map[string]time.Time{}
 	}
-	f.Notifications[key] = now.UTC()
+	s.Notifications[key] = now.UTC()
 }
 
-func (f *File) Save(path string) error {
-	data, err := json.MarshalIndent(f, "", "  ")
+func (s *Store) Save(path string) error {
+	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode state: %w", err)
 	}

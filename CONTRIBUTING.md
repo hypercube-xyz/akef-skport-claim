@@ -19,3 +19,19 @@ cd akef-skport-claim
 
 go mod download
 make check
+```
+
+## Project layout
+
+- `cmd/akef-claim`: process entry point only.
+- `internal/cli`: commands and exit-code handling.
+- `internal/app`: run orchestration and account decisions.
+- `internal/skport`: SKPORT HTTP, signing, and response normalization.
+- `internal/config` and `internal/state`: user configuration and persisted state.
+- `internal/notify`: notification selection and destination transports.
+- `internal/result` and `internal/report`: run data and presentation.
+- `internal/atomicfile`, `internal/lock`, and `internal/logging`: shared infrastructure.
+
+Keep protocol code in `skport`, command behavior in `cli`, and workflow
+decisions in `app`. Prefer extending an existing package over adding a package
+for a single type or constant.
