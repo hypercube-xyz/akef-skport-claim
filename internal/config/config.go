@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -126,11 +127,39 @@ func ResolvePath(path string) (string, error) {
 	if path != "" {
 		return filepath.Abs(path)
 	}
-	base, err := os.UserConfigDir()
+	base, err := defaultConfigDir(runtime.GOOS, os.Getenv, os.UserHomeDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve user config directory: %w", err)
 	}
 	return filepath.Join(base, AppDir, "config.toml"), nil
+}
+
+func defaultConfigDir(goos string, getenv func(string) string, userHomeDir func() (string, error)) (string, error) {
+	switch goos {
+	case "windows":
+		if base := getenv("LOCALAPPDATA"); base != "" {
+			return base, nil
+		}
+		return "", errors.New("LOCALAPPDATA is not defined")
+	case "darwin":
+		home, err := userHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, "Library", "Application Support"), nil
+	default:
+		if base := getenv("XDG_CONFIG_HOME"); base != "" {
+			if !filepath.IsAbs(base) {
+				return "", errors.New("XDG_CONFIG_HOME is not an absolute path")
+			}
+			return base, nil
+		}
+		home, err := userHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, ".config"), nil
+	}
 }
 
 func CacheDir() (string, error) {

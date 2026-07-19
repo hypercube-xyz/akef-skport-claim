@@ -15,7 +15,13 @@ Download and extract the archive for your operating system. Every release archiv
 - Windows: `akef-claim.exe`
 - Linux/macOS: `akef-claim`
 
-The installer is Bash-only. On Windows, run it from Git Bash:
+On Windows, use the native PowerShell installer:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
+
+On Linux and macOS, use the Bash installer:
 
 ```bash
 ./scripts/install.sh
@@ -63,7 +69,13 @@ Do not use **Copy as cURL**, export a HAR file, post a screenshot, or share the 
 
 Edit the TOML file printed by the installer. Configuration is TOML-only; environment variables are not read as a fallback. The full schema is documented in [configuration documentation](docs/configuration.md) and [config.example.toml](config.example.toml).
 
-Run the installer again after saving the config. It validates the file and installs the operating-system scheduler directly. The default time is `00:05` in the user's local timezone; override it with `--time HH:MM`:
+Run the installer again after saving the config. It validates the file and installs the operating-system scheduler directly. The default time is `00:05` in the user's local timezone. Override it on Windows with `-Time HH:mm`:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Time 00:05
+```
+
+On Linux or macOS, use `--time HH:MM`:
 
 ```bash
 ./scripts/install.sh --time 00:05
@@ -105,7 +117,15 @@ Claim-capable runs apply startup jitter before acquiring an exclusive process lo
 ./scripts/uninstall.sh --purge
 ```
 
-- Windows: `install.sh` creates or replaces the task with `schtasks.exe /Create /TN "AKEF SKPort Daily Claim" /XML ... /F`. The temporary XML is removed when installation finishes. The task invokes the same `akef-claim.exe --silent run` process through the built-in PowerShell host with a hidden window. `uninstall.sh` removes it with `schtasks.exe /Delete /TN ... /F`.
+Windows equivalents:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Time 00:05
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1 -Purge
+```
+
+- Windows: `install.ps1` creates or replaces the per-user task through the native ScheduledTasks PowerShell module. The task invokes the same `akef-claim.exe --silent run` process through a hidden PowerShell host. `uninstall.ps1` removes it without requiring Git Bash.
 - Linux: the installer writes and enables a user-level systemd service/timer. If no usable systemd user manager is available, it installs one tagged crontab block without modifying unrelated entries.
 - macOS: the installer writes and loads a user LaunchAgent.
 
@@ -151,7 +171,7 @@ make uninstall
 make snapshot
 ```
 
-`make repo-check` rejects secret-bearing or stale tracked files. `make check` also verifies modules, tidy state, Go formatting, Bash syntax, vet, and tests. `make ci` additionally runs the race detector and builds the current platform. `make install` and `make uninstall` delegate to the Bash scheduler scripts. `make snapshot` requires GoReleaser and creates local release archives without publishing them.
+`make repo-check` rejects secret-bearing or stale tracked files. `make check` also verifies modules, tidy state, script syntax, vet, and tests. `make ci` additionally runs the race detector and builds the current platform. `make install` and `make uninstall` select the native PowerShell scripts on Windows and Bash scripts on Linux/macOS. `make snapshot` requires GoReleaser and creates local release archives without publishing them.
 
 ## Troubleshooting and reporting
 

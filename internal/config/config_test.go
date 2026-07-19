@@ -164,6 +164,46 @@ func TestInitRefusesExistingAndForceReplacesAtomically(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigDirUsesNativePerUserLocations(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	localAppData := filepath.Join(home, "AppData", "Local")
+	xdgConfig := filepath.Join(home, "xdg-config")
+	tests := []struct {
+		name     string
+		goos     string
+		env      map[string]string
+		expected string
+	}{
+		{name: "windows", goos: "windows", env: map[string]string{"LOCALAPPDATA": localAppData}, expected: localAppData},
+		{name: "linux-xdg", goos: "linux", env: map[string]string{"XDG_CONFIG_HOME": xdgConfig}, expected: xdgConfig},
+		{name: "linux-default", goos: "linux", expected: filepath.Join(home, ".config")},
+		{name: "macos", goos: "darwin", expected: filepath.Join(home, "Library", "Application Support")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := defaultConfigDir(test.goos, func(key string) string { return test.env[key] }, func() (string, error) { return home, nil })
+			if err != nil || got != test.expected {
+				t.Fatalf("default config directory: got=%q expected=%q err=%v", got, test.expected, err)
+			}
+		})
+	}
+}
+
+func TestDefaultConfigDirRejectsMissingOrRelativeEnvironmentPaths(t *testing.T) {
+	home := func() (string, error) { return filepath.Join(t.TempDir(), "home"), nil }
+	if _, err := defaultConfigDir("windows", func(string) string { return "" }, home); err == nil {
+		t.Fatal("missing LOCALAPPDATA was accepted")
+	}
+	if _, err := defaultConfigDir("linux", func(key string) string {
+		if key == "XDG_CONFIG_HOME" {
+			return "relative"
+		}
+		return ""
+	}, home); err == nil {
+		t.Fatal("relative XDG_CONFIG_HOME was accepted")
+	}
+}
+
 func TestEmbeddedExampleMatchesRepositoryFile(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "config.example.toml"))
 	if err != nil {

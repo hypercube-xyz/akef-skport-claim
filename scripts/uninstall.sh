@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 umask 077
 
-readonly task_name='AKEF SKPort Daily Claim'
 readonly systemd_unit='akef-skport-claim'
 readonly launchd_label='io.github.hypercube-xyz.akef-skport-claim'
 readonly cron_begin='# BEGIN akef-skport-claim'
@@ -29,8 +28,8 @@ done
 os_name="$(uname -s)"
 case "$os_name" in
   MINGW* | MSYS* | CYGWIN*)
-    platform='windows'
-    binary_name='akef-claim.exe'
+    printf 'Windows uninstallation is handled by scripts/uninstall.ps1.\n' >&2
+    exit 1
     ;;
   Linux*)
     platform='linux'
@@ -57,30 +56,6 @@ cleanup() {
   done
 }
 trap cleanup EXIT
-
-remove_windows_scheduler() {
-  command -v schtasks.exe >/dev/null 2>&1 || {
-    printf 'schtasks.exe is required to remove the Windows task.\n' >&2
-    return 1
-  }
-
-  if ! schtasks.exe /Query /TN "$task_name" >/dev/null 2>&1; then
-    printf 'Task Scheduler task already absent: %s\n' "$task_name"
-    return 0
-  fi
-
-  # Stop an active instance first. /End fails when the task is not currently
-  # running, so that result is intentionally ignored.
-  schtasks.exe /End /TN "$task_name" >/dev/null 2>&1 || true
-  schtasks.exe /Delete /TN "$task_name" /F
-
-  if schtasks.exe /Query /TN "$task_name" >/dev/null 2>&1; then
-    printf 'Task Scheduler task still exists after deletion: %s\n' "$task_name" >&2
-    return 1
-  fi
-
-  printf 'Removed Task Scheduler task: %s\n' "$task_name"
-}
 
 remove_cron_block() {
   command -v crontab >/dev/null 2>&1 || return 0
@@ -152,7 +127,6 @@ remove_macos_scheduler() {
 
 remove_scheduler() {
   case "$platform" in
-    windows) remove_windows_scheduler ;;
     linux) remove_linux_scheduler ;;
     macos) remove_macos_scheduler ;;
   esac
@@ -160,22 +134,6 @@ remove_scheduler() {
 
 resolve_user_paths() {
   case "$platform" in
-    windows)
-      command -v cygpath >/dev/null 2>&1 || {
-        printf 'cygpath is required for --purge on Windows. Run this script from Git Bash.\n' >&2
-        return 1
-      }
-      [[ -n "${APPDATA:-}" ]] || {
-        printf 'APPDATA is not set.\n' >&2
-        return 1
-      }
-      [[ -n "${LOCALAPPDATA:-}" ]] || {
-        printf 'LOCALAPPDATA is not set.\n' >&2
-        return 1
-      }
-      config_path="$(cygpath -au "$APPDATA")/akef-skport-claim/config.toml"
-      cache_dir="$(cygpath -au "$LOCALAPPDATA")/akef-skport-claim"
-      ;;
     linux)
       config_path="${XDG_CONFIG_HOME:-$HOME/.config}/akef-skport-claim/config.toml"
       cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/akef-skport-claim"

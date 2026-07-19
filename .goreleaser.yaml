@@ -41,6 +41,10 @@ archives:
         dst: scripts/uninstall.sh
         info:
           mode: 0755
+      - src: scripts/install.ps1
+        dst: scripts/install.ps1
+      - src: scripts/uninstall.ps1
+        dst: scripts/uninstall.ps1
 
 checksum:
   name_template: checksums.txt
