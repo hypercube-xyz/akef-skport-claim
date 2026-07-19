@@ -1,0 +1,50 @@
+version: 2
+
+project_name: akef-claim
+
+builds:
+  - id: akef-claim
+    main: ./cmd/akef-claim
+    binary: akef-claim
+    env:
+      - CGO_ENABLED=0
+    goos: [windows, linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/hypercube-xyz/akef-skport-claim/internal/version.Version={{.Version}}
+        -X github.com/hypercube-xyz/akef-skport-claim/internal/version.Commit={{.Commit}}
+        -X github.com/hypercube-xyz/akef-skport-claim/internal/version.Date={{.Date}}
+
+archives:
+  - ids: [akef-claim]
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - README.th.md
+      - SECURITY.md
+      - src: docs/*.md
+        dst: docs
+      - LICENSE-MIT
+      - LICENSE-APACHE
+      - config.example.toml
+      - src: scripts/install.sh
+        dst: scripts/install.sh
+        info:
+          mode: 0755
+      - src: scripts/uninstall.sh
+        dst: scripts/uninstall.sh
+        info:
+          mode: 0755
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: git
