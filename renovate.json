@@ -1,0 +1,21 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabledManagers": ["gomod"],
+  "packageRules": [
+    {
+      "description": "Dependabot owns Go module dependencies",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["require", "indirect", "replace", "tool", "golang"],
+      "enabled": false
+    },
+    {
+      "description": "Update Go toolchain patch releases",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["toolchain"],
+      "matchUpdateTypes": ["patch"],
+      "rangeStrategy": "bump",
+      "commitMessagePrefix": "chore(toolchain):",
+      "labels": ["dependencies", "go"]
+    }
+  ]
+}
