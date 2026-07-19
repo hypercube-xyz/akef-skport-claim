@@ -51,3 +51,16 @@ checksum:
 
 changelog:
   use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^docs(?:\([^)]*\))?:'
+      - '^test(?:\([^)]*\))?:'
+      - '^chore(?:\([^)]*\))?:'
+      - '^ci(?:\([^)]*\))?:'
+      - '^style(?:\([^)]*\))?:'
+      - '^Merge '
+
+release:
+  draft: false
+  prerelease: auto
