@@ -1,0 +1,26 @@
+# Local configuration and credentials
+config.toml
+**/config.toml
+*.local.toml
+.env*
+**/.env*
+
+# Runtime state and logs
+*.log
+state.json
+*.lock
+
+# Build output
+bin/
+dist/
+coverage.out
+/akef-claim
+/akef-claim.exe
+
+# Local backups and editor metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
