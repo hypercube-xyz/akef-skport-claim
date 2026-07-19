@@ -1,0 +1,92 @@
+name: Feature request
+description: Suggest an improvement without exposing secrets
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement.
+
+        Never paste credentials, cookies, authorization headers, full config files,
+        bot tokens, chat IDs, webhook URLs, HAR files, or other account secrets.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched the existing issues and did not find the same request.
+          required: true
+        - label: I confirmed that this issue contains no credentials or other secrets.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the project would this feature affect?
+      options:
+        - CLI and command behavior
+        - Configuration
+        - SKPORT client or attendance handling
+        - Multi-account support
+        - Notifications
+        - Windows Task Scheduler installation
+        - Linux systemd or cron installation
+        - macOS launchd installation
+        - Logging and diagnostics
+        - Documentation
+        - Build, CI, or release packaging
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe the problem this feature would solve. Explain the user-facing need rather than only the proposed implementation.
+      placeholder: |
+        I need to ...
+        Currently ...
+        This matters because ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe how the feature should work, including expected commands, configuration, output, or platform behavior.
+      placeholder: |
+        Proposed behavior:
+        - ...
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any workarounds or alternative designs you considered.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add safe examples, mock output, or links. Use placeholders for all account and notification values.
+
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Project boundaries
+      options:
+        - label: This request does not add CAPTCHA bypassing, credential harvesting, browser fingerprint spoofing, or access-control evasion.
+          required: true
+        - label: This request does not add scheduled daily claims through GitHub-hosted Actions.
+          required: true
+        - label: This request preserves the rule that claim POST requests are not retried automatically.
+          required: true

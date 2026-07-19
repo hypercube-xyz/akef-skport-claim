@@ -1,0 +1,214 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # actions/setup-go installs the version declared by go.mod.
+  # Prevent individual Go commands from downloading another toolchain.
+  GOTOOLCHAIN: local
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Record tool versions
+        run: |
+          set -euo pipefail
+
+          go version
+          go env GOOS GOARCH CGO_ENABLED GOTOOLCHAIN
+          git --version
+
+      - name: Download and verify modules
+        run: |
+          set -euo pipefail
+
+          go mod download
+          go mod verify
+
+      - name: Verify module files are tidy
+        run: |
+          set -euo pipefail
+
+          go mod tidy -diff
+
+      - name: Verify formatting
+        run: |
+          set -euo pipefail
+
+          unformatted="$(gofmt -l .)"
+
+          if [[ -n "${unformatted}" ]]; then
+            printf 'The following files require gofmt:\n%s\n' "${unformatted}"
+            exit 1
+          fi
+
+      - name: Check whitespace
+        run: |
+          set -euo pipefail
+
+          git diff --check
+
+      - name: Validate Bash scripts
+        run: |
+          set -euo pipefail
+
+          bash -n scripts/*.sh
+          ./scripts/install.sh --help >/dev/null
+          ./scripts/uninstall.sh --help >/dev/null
+          ./scripts/check-repository.sh
+
+      - name: Vet
+        run: |
+          set -euo pipefail
+
+          go vet ./...
+
+      - name: Test with race detector
+        run: |
+          set -euo pipefail
+
+          go test -race -count=1 ./...
+
+      - name: Build CLI
+        run: |
+          set -euo pipefail
+
+          go build \
+            -trimpath \
+            -o "${RUNNER_TEMP}/akef-claim" \
+            ./cmd/akef-claim
+
+      - name: Validate GoReleaser configuration
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "v2.17.0"
+          args: check
+
+      - name: Verify clean source tree
+        run: |
+          set -euo pipefail
+
+          git diff --check
+
+          status="$(git status --porcelain=v1 --untracked-files=all)"
+
+          if [[ -n "${status}" ]]; then
+            printf 'CI commands modified the source tree:\n%s\n' "${status}"
+            exit 1
+          fi
+
+  platform-test:
+    name: Test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    continue-on-error: ${{ matrix.experimental }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 26.04
+            os: ubuntu-26.04
+            binary: akef-claim
+            experimental: true
+
+          - name: Windows 2025
+            os: windows-2025
+            binary: akef-claim.exe
+            experimental: false
+
+          - name: macOS 26 arm64
+            os: macos-26
+            binary: akef-claim
+            experimental: false
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Record tool versions
+        run: |
+          set -euo pipefail
+
+          go version
+          go env GOOS GOARCH CGO_ENABLED GOTOOLCHAIN
+          git --version
+
+      - name: Download and verify modules
+        run: |
+          set -euo pipefail
+
+          go mod download
+          go mod verify
+
+      - name: Test
+        run: |
+          set -euo pipefail
+
+          go test -count=1 ./...
+
+      - name: Build CLI
+        run: |
+          set -euo pipefail
+
+          go build \
+            -trimpath \
+            -o "${RUNNER_TEMP}/${{ matrix.binary }}" \
+            ./cmd/akef-claim
+
+      - name: Verify clean source tree
+        run: |
+          set -euo pipefail
+
+          git diff --check
+
+          status="$(git status --porcelain=v1 --untracked-files=all)"
+
+          if [[ -n "${status}" ]]; then
+            printf 'CI commands modified the source tree:\n%s\n' "${status}"
+            exit 1
+          fi
