@@ -29,12 +29,12 @@ Startup random delay is controlled by `[run].random_delay` and occurs before the
 `install.ps1` uses the native ScheduledTasks PowerShell module. The relevant operations are equivalent to:
 
 ```powershell
-$action = New-ScheduledTaskAction -Execute powershell.exe -Argument $hiddenArguments
+$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wscript.exe" -Argument $backgroundLauncher
 $trigger = New-ScheduledTaskTrigger -Daily -At 00:05
 Register-ScheduledTask -TaskName 'AKEF SKPort Daily Claim' -InputObject $task
 ```
 
-The task uses the current user's interactive token with least privilege, `IgnoreNew`, missed-start handling, a 35-minute execution limit, and a hidden built-in PowerShell action. That action invokes the installed `akef-claim.exe --silent run --config ...` and maps only exit code `30` to Task Scheduler failure, allowing at most three delayed retries. Definite or ambiguous claim outcomes are mapped to scheduler success so they cannot cause another claim attempt.
+The task uses the current user's interactive token with least privilege, `IgnoreNew`, missed-start handling, and a 35-minute execution limit. Its Windows Script Host launcher invokes the installed `akef-claim.exe --silent run --config ...` without creating a console window, including when the task is started manually. The launcher maps only exit code `30` to Task Scheduler failure, allowing at most three delayed retries. Definite or ambiguous claim outcomes are mapped to scheduler success so they cannot cause another claim attempt.
 
 Removal uses the same native module:
 

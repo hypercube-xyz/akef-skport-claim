@@ -10,12 +10,18 @@ The tool runs on your computer, stores no credentials remotely, exposes no serve
 
 ## Install and first-time setup
 
-Download and extract the archive for your operating system. Every release archive contains exactly one executable:
+Download and extract the archive for your operating system. Every release archive contains the platform executable together with the installer scripts and documentation:
 
 - Windows: `akef-claim.exe`
 - Linux/macOS: `akef-claim`
 
 On Windows, use the native PowerShell installer:
+
+```powershell
+./scripts/install.ps1
+```
+
+If PowerShell blocks local scripts because of its execution policy, use:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
@@ -69,13 +75,15 @@ Do not use **Copy as cURL**, export a HAR file, post a screenshot, or share the 
 
 Edit the TOML file printed by the installer. Configuration is TOML-only; environment variables are not read as a fallback. The full schema is documented in [configuration documentation](docs/configuration.md) and [config.example.toml](config.example.toml).
 
-Run the installer again after saving the config. It validates the file and installs the operating-system scheduler directly. The default time is `00:05` in the user's local timezone. Override it on Windows with `-Time HH:mm`:
+Run the installer again after saving the config. It validates the file and installs the operating-system scheduler directly. The default time is `00:05` in the user's local timezone.
+
+On Windows, use the PowerShell parameter `-Time` (one dash). For example, to run every day at midnight:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Time 00:05
+./scripts/install.ps1 -Time '00:00'
 ```
 
-On Linux or macOS, use `--time HH:MM`:
+On Linux or macOS, use the Bash option `--time` (two dashes):
 
 ```bash
 ./scripts/install.sh --time 00:05
@@ -89,7 +97,7 @@ akef-claim config validate
 akef-claim status
 ```
 
-Scheduler creation and removal are intentionally owned by the Bash scripts rather than CLI subcommands.
+Scheduler creation and removal are intentionally owned by the native installer scripts rather than CLI subcommands.
 
 For additional accounts, add another `[[accounts]]` table with a unique `name`, then repeat the header-capture steps while signed in to the intended account and role.
 
@@ -120,16 +128,16 @@ Claim-capable runs apply startup jitter before acquiring an exclusive process lo
 Windows equivalents:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Time 00:05
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1 -Purge
+./scripts/install.ps1 -Time '00:00'
+./scripts/uninstall.ps1
+./scripts/uninstall.ps1 -Purge
 ```
 
-- Windows: `install.ps1` creates or replaces the per-user task through the native ScheduledTasks PowerShell module. The task invokes the same `akef-claim.exe --silent run` process through a hidden PowerShell host. `uninstall.ps1` removes it without requiring Git Bash.
+- Windows: `install.ps1` creates or replaces the per-user task through the native ScheduledTasks PowerShell module. A Windows Script Host launcher starts `akef-claim.exe --silent run` with no console window, including for manual Task Scheduler runs. `uninstall.ps1` removes the task and launcher without requiring Git Bash.
 - Linux: the installer writes and enables a user-level systemd service/timer. If no usable systemd user manager is available, it installs one tagged crontab block without modifying unrelated entries.
 - macOS: the installer writes and loads a user LaunchAgent.
 
-A silent scheduled invocation has a 30-minute application deadline. Windows also applies a 30-minute Task Scheduler execution limit and retries up to three times, 30 minutes apart, only when the application returns transient pre-claim exit code `30`. Linux and macOS do not add process retries. The claim POST itself is never retried automatically.
+A silent scheduled invocation has a 30-minute application deadline. Windows applies a 35-minute Task Scheduler execution limit and retries up to three times, 30 minutes apart, only when the application returns transient pre-claim exit code `30`. Linux and macOS do not add process retries. The claim POST itself is never retried automatically.
 
 Scheduled logs are written as daily files under the operating-system user cache directory. At every silent start, regular AKEF scheduled logs older than 45 days are deleted; a current daily file is also size-rotated after 5 MiB. Uninstall retains configuration, logs, and notification state unless `--purge` is supplied.
 
@@ -181,4 +189,4 @@ See [SECURITY.md](SECURITY.md) for private vulnerability reporting guidance.
 
 ## License
 
-Licensed under either the Apache License 2.0 or the MIT License, at your option. See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT).
+Licensed under the MIT License. See [LICENSE](LICENSE).

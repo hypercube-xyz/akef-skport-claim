@@ -220,6 +220,7 @@ jobs:
           }
           ./scripts/install.ps1 -Help
           ./scripts/uninstall.ps1 -Help
+          ./scripts/test-install.ps1
 
       - name: Verify clean source tree
         run: |

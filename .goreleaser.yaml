@@ -30,8 +30,7 @@ archives:
       - SECURITY.md
       - src: docs/*.md
         dst: docs
-      - LICENSE-MIT
-      - LICENSE-APACHE
+      - LICENSE
       - config.example.toml
       - src: scripts/install.sh
         dst: scripts/install.sh

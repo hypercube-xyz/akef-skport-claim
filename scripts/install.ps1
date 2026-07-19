@@ -33,45 +33,44 @@ function Test-PathOnUserPath {
     return $false
 }
 
-function New-TaskCommand {
+function ConvertTo-VbScriptStringLiteral {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return '"' + $Value.Replace('"', '""') + '"'
+}
+
+function New-TaskLauncherContent {
     param(
         [Parameter(Mandatory = $true)][string]$Binary,
         [Parameter(Mandatory = $true)][string]$Config
     )
 
-    $escapedBinary = $Binary.Replace("'", "''")
-    $escapedConfig = $Config.Replace("'", "''")
+    $binaryLiteral = ConvertTo-VbScriptStringLiteral -Value $Binary
+    $command = '"' + $Binary + '" --silent run --config "' + $Config + '"'
+    $commandLiteral = ConvertTo-VbScriptStringLiteral -Value $command
     return @"
-`$ErrorActionPreference = 'Stop'
-try {
-    `$binary = '$escapedBinary'
-    `$config = '$escapedConfig'
+Option Explicit
+Dim command, exitCode, fileSystem, shell
 
-    if (-not (Test-Path -LiteralPath `$binary -PathType Leaf)) {
-        throw 'akef-claim executable was not found'
-    }
+Set fileSystem = CreateObject("Scripting.FileSystemObject")
+If Not fileSystem.FileExists($binaryLiteral) Then
+    WScript.Quit 1
+End If
 
-    & `$binary --silent run --config `$config
-    `$code = `$LASTEXITCODE
-    if (`$null -eq `$code) {
-        throw 'akef-claim did not return an exit code'
-    }
-}
-catch {
-    exit 1
-}
+command = $commandLiteral
+Set shell = CreateObject("WScript.Shell")
+exitCode = shell.Run(command, 0, True)
 
-if (`$code -eq 30) {
-    exit 1
-}
-exit 0
+If exitCode = 30 Then
+    WScript.Quit 1
+End If
+WScript.Quit 0
 "@
 }
 
 function Install-ScheduledClaim {
     param(
-        [Parameter(Mandatory = $true)][string]$Binary,
-        [Parameter(Mandatory = $true)][string]$Config,
+        [Parameter(Mandatory = $true)][string]$Launcher,
         [Parameter(Mandatory = $true)][datetime]$At
     )
 
@@ -81,11 +80,13 @@ function Install-ScheduledClaim {
         }
     }
 
-    $taskCommand = New-TaskCommand -Binary $Binary -Config $Config
-    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($taskCommand))
+    $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+    if (-not (Test-Path -LiteralPath $wscript -PathType Leaf)) {
+        throw 'Windows Script Host was not found'
+    }
     $action = New-ScheduledTaskAction `
-        -Execute 'powershell.exe' `
-        -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $encodedCommand"
+        -Execute $wscript `
+        -Argument "//B //NoLogo `"$Launcher`""
     $trigger = New-ScheduledTaskTrigger -Daily -At $At
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries `
@@ -110,17 +111,10 @@ function Install-ScheduledClaim {
     $existingXml = $null
     if ($null -ne $existingTask) {
         $existingXml = Export-ScheduledTask -TaskName $taskName
-        try {
-            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-        }
-        catch {
-            throw "The existing task cannot be replaced by the current user. Remove '$taskName' from an elevated Task Scheduler or PowerShell session, then run the installer again. $($_.Exception.Message)"
-        }
     }
 
     try {
-        Register-ScheduledTask -TaskName $taskName -InputObject $task | Out-Null
+        Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null
     }
     catch {
         $installError = $_
@@ -235,8 +229,19 @@ try {
     }
 
     Invoke-AkefClaim -Binary $installedBinary -Arguments @('config', 'validate')
+    $installedLauncher = Join-Path $installDirectory 'akef-claim-scheduled.vbs'
+    $temporaryLauncher = Join-Path $installDirectory ".akef-claim-scheduled.vbs.install.$([guid]::NewGuid().ToString('N'))"
+    try {
+        $launcherContent = New-TaskLauncherContent -Binary $installedBinary -Config $configPath
+        [IO.File]::WriteAllText($temporaryLauncher, $launcherContent, [Text.Encoding]::Unicode)
+        Move-Item -LiteralPath $temporaryLauncher -Destination $installedLauncher -Force
+    }
+    finally {
+        Remove-Item -LiteralPath $temporaryLauncher -Force -ErrorAction SilentlyContinue
+    }
+
     $scheduledAt = [datetime]::Today.Add($parsedTime.TimeOfDay)
-    Install-ScheduledClaim -Binary $installedBinary -Config $configPath -At $scheduledAt
+    Install-ScheduledClaim -Launcher $installedLauncher -At $scheduledAt
 
     if ($migratedLegacyConfig) {
         Remove-Item -LiteralPath $legacyConfig -Force

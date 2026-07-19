@@ -13,11 +13,13 @@ INSTALL_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionP
 UNINSTALL_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/uninstall.ps1
 INSTALL_HELP_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/install.ps1 -Help
 UNINSTALL_HELP_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/uninstall.ps1 -Help
+INSTALL_TEST_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-install.ps1
 else
 INSTALL_COMMAND := ./scripts/install.sh --time "$(SCHEDULE_TIME)"
 UNINSTALL_COMMAND := ./scripts/uninstall.sh
 INSTALL_HELP_COMMAND := ./scripts/install.sh --help
 UNINSTALL_HELP_COMMAND := ./scripts/uninstall.sh --help
+INSTALL_TEST_COMMAND := :
 endif
 
 .PHONY: all help fmt fmt-check shell-check repo-check tidy tidy-check verify vet test test-race build install uninstall check ci snapshot clean
@@ -49,6 +51,7 @@ shell-check:
 	bash -n scripts/*.sh
 	$(INSTALL_HELP_COMMAND) >/dev/null
 	$(UNINSTALL_HELP_COMMAND) >/dev/null
+	$(INSTALL_TEST_COMMAND)
 
 repo-check:
 	./scripts/check-repository.sh

@@ -177,7 +177,7 @@ check_forbidden_content() {
   local output
   local pattern
 
-  pattern='ubuntu-24\.06|example\.com/akef-skport-claim|akef-claim-runner|run_silent\.vbs|wscript(\.exe)?|akef-claim[[:space:]]+schedule[[:space:]]+(install|uninstall)|SKPORT_CRED|SKPORT_GAME_ROLE'
+  pattern='ubuntu-24\.06|example\.com/akef-skport-claim|akef-claim-runner|run_silent\.vbs|akef-claim[[:space:]]+schedule[[:space:]]+(install|uninstall)|SKPORT_CRED|SKPORT_GAME_ROLE'
 
   output="$(git grep -nEI "$pattern" -- . ":(exclude)scripts/$SCRIPT_NAME" || true)"
   if [[ -n "$output" ]]; then

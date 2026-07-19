@@ -37,6 +37,15 @@ try {
 
     $installDirectory = Join-Path $env:LOCALAPPDATA "Programs\$appDirectory\bin"
     $installedBinary = Join-Path $installDirectory 'akef-claim.exe'
+    $installedLauncher = Join-Path $installDirectory 'akef-claim-scheduled.vbs'
+    if (Test-Path -LiteralPath $installedLauncher -PathType Leaf) {
+        Remove-Item -LiteralPath $installedLauncher -Force
+        Write-Output "Removed scheduler launcher: $installedLauncher"
+    }
+    else {
+        Write-Output "Scheduler launcher already absent: $installedLauncher"
+    }
+
     if (Test-Path -LiteralPath $installedBinary -PathType Leaf) {
         Remove-Item -LiteralPath $installedBinary -Force
         Write-Output "Removed binary: $installedBinary"
