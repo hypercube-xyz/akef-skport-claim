@@ -177,7 +177,7 @@ check_forbidden_content() {
   local output
   local pattern
 
-  pattern='ubuntu-24\.06|example\.com/akef-skport-claim|akef-claim-runner|run_silent\.vbs|wscript(\.exe)?|akef-claim[[:space:]]+schedule[[:space:]]+(install|uninstall)|SKPORT_CRED|SKPORT_GAME_ROLE'
+  pattern='ubuntu-24\.06|example\.com/akef-skport-claim|akef-claim-runner|run_silent\.vbs|akef-claim[[:space:]]+schedule[[:space:]]+(install|uninstall)|SKPORT_CRED|SKPORT_GAME_ROLE'
 
   output="$(git grep -nEI "$pattern" -- . ":(exclude)scripts/$SCRIPT_NAME" || true)"
   if [[ -n "$output" ]]; then
@@ -286,8 +286,8 @@ check_script_modes() {
   fi
 }
 
-check_readmes() {
-  local file needle
+check_readme() {
+  local needle
   local required_text=(
     './scripts/install.sh'
     './scripts/uninstall.sh'
@@ -297,12 +297,10 @@ check_readmes() {
     'Sk-Game-Role'
   )
 
-  for file in README.md; do
-    for needle in "${required_text[@]}"; do
-      if ! grep -Fq -- "$needle" "$file"; then
-        fail "$file is missing required setup text: $needle"
-      fi
-    done
+  for needle in "${required_text[@]}"; do
+    if ! grep -Fq -- "$needle" "README.md"; then
+      fail "README.md is missing required setup text: $needle"
+    fi
   done
 
   ok 'README setup sections checked'
@@ -361,7 +359,7 @@ main() {
   check_config_assignments
   check_workflows
   check_script_modes
-  check_readmes
+  check_readme
   check_source_formatting
   check_git_whitespace
 

@@ -4,8 +4,14 @@ The only configuration sources are the default TOML file and the global `--confi
 
 Default paths:
 
-- Windows: the current user's configuration and cache directories returned by the operating system
-- Linux/macOS: the directories returned by Go's `os.UserConfigDir` and `os.UserCacheDir`
+- Windows config: `%LOCALAPPDATA%\akef-skport-claim\config.toml`
+- Linux config: `${XDG_CONFIG_HOME:-$HOME/.config}/akef-skport-claim/config.toml`
+- macOS config: `$HOME/Library/Application Support/akef-skport-claim/config.toml`
+
+Cache and scheduled logs use the operating system's per-user cache directory.
+The Windows installer copies an existing `%APPDATA%\akef-skport-claim\config.toml`
+to the non-roaming location and removes the legacy copy only after the new
+scheduler installation succeeds.
 
 The application subdirectory is always `akef-skport-claim`. Run `akef-claim config path` to see the exact config path.
 
@@ -21,4 +27,4 @@ For your own account, sign in at `https://game.skport.com/endfield/sign-in`, ins
 
 Do not copy the full request as cURL, export a HAR file, or share screenshots/full headers. Those forms may expose additional session material. If either value is disclosed, log out, sign in again, and replace the stored values. See the README for step-by-step instructions.
 
-Scheduler time is an installer concern rather than an application configuration key. Use `./scripts/install.sh --time HH:MM`; a `[schedule]` table is not part of the TOML schema.
+Scheduler time is an installer concern rather than an application configuration key. Use `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Time HH:mm` on Windows or `./scripts/install.sh --time HH:MM` on Linux/macOS; a `[schedule]` table is not part of the TOML schema.

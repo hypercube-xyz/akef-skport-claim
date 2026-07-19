@@ -5,14 +5,13 @@ import (
 	"math"
 	"sort"
 
-	"github.com/hypercube-xyz/akef-skport-claim/internal/model"
+	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 )
 
 type APIResponse struct {
-	Code      int64           `json:"code"`
-	Message   string          `json:"message"`
-	Data      json.RawMessage `json:"data"`
-	Timestamp string          `json:"timestamp,omitempty"`
+	Code    int64           `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
 }
 
 type RefreshResponse struct {
@@ -70,21 +69,17 @@ func (r AttendanceResponse) root() any {
 	return value
 }
 
-// State evaluates available/done flags per object rather than independently
-// across the whole document. This distinction matters when historical calendar
-// entries are done while today's entry is available. A clean available item wins
-// over historical done items only when the response contains no contradictory
-// object; any same-object available/done conflict fails the whole response closed.
+// State evaluates the root compatibility shape and nested attendance items rather
+// than accepting available/done fields from arbitrary metadata. This distinction
+// matters when historical calendar entries are done while today's entry is
+// available, and prevents unrelated nested objects from triggering a claim.
 func (r AttendanceResponse) State() AttendanceState {
 	root := r.root()
 	state := AttendanceState{}
-	if object, ok := root.(map[string]any); ok {
-		state.HasToday, state.HasTodayKnown = directBool(object, hasTodayKeys)
-	}
 
 	var cleanAvailable bool
 	var anyDone bool
-	walkObjects(root, func(object map[string]any) {
+	evaluate := func(object map[string]any) {
 		available, availableKnown := directBool(object, availableKeys)
 		done, doneKnown := directBool(object, doneKeys)
 		state.AvailableKnown = state.AvailableKnown || availableKnown
@@ -102,7 +97,18 @@ func (r AttendanceResponse) State() AttendanceState {
 		if doneKnown && done {
 			anyDone = true
 		}
-	})
+	}
+
+	if object, ok := root.(map[string]any); ok {
+		state.HasToday, state.HasTodayKnown = directBool(object, hasTodayKeys)
+		// Some observed and legacy response shapes expose state directly on data.
+		evaluate(object)
+		for _, nested := range object {
+			walkAttendanceItems(nested, evaluate)
+		}
+	} else {
+		walkAttendanceItems(root, evaluate)
+	}
 
 	switch {
 	case state.Conflict:
@@ -121,24 +127,7 @@ func (r AttendanceResponse) State() AttendanceState {
 	return state
 }
 
-func (r AttendanceResponse) Available() (bool, bool) {
-	state := r.State()
-	return state.Available, state.AvailableKnown
-}
-
-func (r AttendanceResponse) Done() (bool, bool) {
-	state := r.State()
-	return state.Done, state.DoneKnown
-}
-
-func (r AttendanceResponse) HasToday() (bool, bool) {
-	state := r.State()
-	return state.HasToday, state.HasTodayKnown
-}
-
-func (r AttendanceResponse) SessionValid() bool { return r.State().SessionValid }
-
-func (r AttendanceResponse) AvailableRewards() []model.Reward {
+func (r AttendanceResponse) AvailableRewards() []result.Reward {
 	if r.State().Conflict {
 		return nil
 	}
@@ -151,7 +140,7 @@ func (r AttendanceResponse) AvailableRewards() []model.Reward {
 		keys = append(keys, id)
 	}
 	sort.Strings(keys)
-	rewards := make([]model.Reward, 0, len(keys))
+	rewards := make([]result.Reward, 0, len(keys))
 	for _, id := range keys {
 		rewards = append(rewards, rewardFromResource(resourceMap, id))
 	}
@@ -171,14 +160,14 @@ func (r ClaimResponse) Classify() ClaimClass {
 	}
 }
 
-func (r ClaimResponse) Rewards() []model.Reward {
+func (r ClaimResponse) Rewards() []result.Reward {
 	var root map[string]any
 	if json.Unmarshal(r.Data, &root) != nil {
 		return nil
 	}
 	values, _ := root["awardIds"].([]any)
 	resources := resourceInfoMap(root)
-	rewards := make([]model.Reward, 0, len(values))
+	rewards := make([]result.Reward, 0, len(values))
 	for _, value := range values {
 		id := ""
 		switch item := value.(type) {
@@ -224,16 +213,18 @@ func directBool(object map[string]any, keys map[string]struct{}) (bool, bool) {
 	return false, knownFalse
 }
 
-func walkObjects(value any, visit func(map[string]any)) {
+func walkAttendanceItems(value any, visit func(map[string]any)) {
 	switch typed := value.(type) {
 	case map[string]any:
-		visit(typed)
+		if awardID, ok := typed["awardId"].(string); ok && awardID != "" {
+			visit(typed)
+		}
 		for _, nested := range typed {
-			walkObjects(nested, visit)
+			walkAttendanceItems(nested, visit)
 		}
 	case []any:
 		for _, nested := range typed {
-			walkObjects(nested, visit)
+			walkAttendanceItems(nested, visit)
 		}
 	}
 }
@@ -267,8 +258,8 @@ func resourceInfoMap(value any) map[string]any {
 	return resources
 }
 
-func rewardFromResource(resources map[string]any, id string) model.Reward {
-	reward := model.Reward{ID: id, Name: id}
+func rewardFromResource(resources map[string]any, id string) result.Reward {
+	reward := result.Reward{ID: id, Name: id}
 	item, _ := resources[id].(map[string]any)
 	if name, ok := item["name"].(string); ok && name != "" {
 		reward.Name = name

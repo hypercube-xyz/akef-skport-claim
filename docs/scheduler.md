@@ -1,6 +1,6 @@
 # Native scheduler installation
 
-Scheduler lifecycle is owned by the Bash scripts, not by `akef-claim` CLI subcommands:
+Scheduler lifecycle is owned by the native installer scripts, not by `akef-claim` CLI subcommands. On Linux and macOS:
 
 ```bash
 ./scripts/install.sh --time 00:05
@@ -8,7 +8,15 @@ Scheduler lifecycle is owned by the Bash scripts, not by `akef-claim` CLI subcom
 ./scripts/uninstall.sh --purge
 ```
 
-`--time` accepts local 24-hour `HH:MM` and defaults to `00:05`. Installation and removal are user-scoped and idempotent. The first install invocation creates the default TOML file and exits; edit its placeholders and run the installer again.
+On Windows, use the native PowerShell scripts:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Time 00:05
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1 -Purge
+```
+
+`-Time` on Windows and `--time` on Linux/macOS accept local 24-hour `HH:mm` and default to `00:05`. Installation and removal are user-scoped and idempotent. The first install invocation creates the default TOML file and exits; edit its placeholders and run the installer again.
 
 ## Execution safety
 
@@ -18,24 +26,26 @@ Startup random delay is controlled by `[run].random_delay` and occurs before the
 
 ## Windows
 
-From Git Bash, `install.sh` generates a temporary Task Scheduler XML document and executes a command equivalent to:
+`install.ps1` uses the native ScheduledTasks PowerShell module. The relevant operations are equivalent to:
 
-```bash
-schtasks.exe /Create /TN "AKEF SKPort Daily Claim" /XML "<temporary-xml>" /F
+```powershell
+$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wscript.exe" -Argument $backgroundLauncher
+$trigger = New-ScheduledTaskTrigger -Daily -At 00:05
+Register-ScheduledTask -TaskName 'AKEF SKPort Daily Claim' -InputObject $task
 ```
 
-The XML configures a daily interactive-token task with `IgnoreNew`, missed-start handling, least privilege, a 30-minute execution limit, and a hidden built-in PowerShell action. That action invokes the installed `akef-claim.exe --silent run --config ...` and maps only exit code `30` to Task Scheduler failure, allowing at most three delayed retries. Definite or ambiguous claim outcomes are mapped to scheduler success so they cannot cause another claim attempt. The temporary XML is deleted by the installer.
+The task uses the current user's interactive token with least privilege, `IgnoreNew`, missed-start handling, and a 35-minute execution limit. Its Windows Script Host launcher invokes the installed `akef-claim.exe --silent run --config ...` without creating a console window, including when the task is started manually. The launcher maps only exit code `30` to Task Scheduler failure, allowing at most three delayed retries. Definite or ambiguous claim outcomes are mapped to scheduler success so they cannot cause another claim attempt.
 
-Removal uses:
+Removal uses the same native module:
 
-```bash
-schtasks.exe /Delete /TN "AKEF SKPort Daily Claim" /F
+```powershell
+Unregister-ScheduledTask -TaskName 'AKEF SKPort Daily Claim' -Confirm:$false
 ```
 
 Query the task directly with:
 
-```bash
-schtasks.exe /Query /TN "AKEF SKPort Daily Claim" /V /FO LIST
+```powershell
+Get-ScheduledTask -TaskName 'AKEF SKPort Daily Claim'
 ```
 
 ## Linux
@@ -56,4 +66,4 @@ The installer writes `~/Library/LaunchAgents/io.github.hypercube-xyz.akef-skport
 launchctl print "gui/$(id -u)/io.github.hypercube-xyz.akef-skport-claim"
 ```
 
-Normal uninstall retains the TOML configuration, logs, lock, and notification state. `./scripts/uninstall.sh --purge` explicitly removes them after removing the scheduler and installed binary.
+Normal uninstall retains the TOML configuration, logs, lock, and notification state. Use `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1 -Purge` on Windows or `./scripts/uninstall.sh --purge` on Linux/macOS to remove them after removing the scheduler and installed binary.

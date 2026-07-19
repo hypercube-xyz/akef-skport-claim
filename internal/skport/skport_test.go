@@ -74,6 +74,12 @@ func TestResponseFixtures(t *testing.T) {
 	if rewards := mixedConflict.AvailableRewards(); len(rewards) != 0 {
 		t.Fatalf("a conflicting response exposed claimable rewards: %#v", rewards)
 	}
+
+	metadata := AttendanceResponse{Code: 0, Data: json.RawMessage(`{"hasToday":true,"resourceInfoMap":{"resource":{"available":true,"done":false}}}`)}
+	metadataState := metadata.State()
+	if metadataState.Available || metadataState.AvailableKnown || metadataState.DoneKnown || !metadataState.SessionValid {
+		t.Fatalf("unrelated metadata changed attendance state: state=%+v", metadataState)
+	}
 	var claim ClaimResponse
 	readFixture(t, "claim_success_with_rewards.json", &claim)
 	if claim.Classify() != ClaimSuccess || claim.Rewards()[0].Summary() != "Talosian Credit Notes|T-Creds x2000" {
@@ -94,8 +100,8 @@ func TestHTTPFlowHeadersAndClaimAtMostOnce(t *testing.T) {
 			request.Header.Get("Content-Type") != "application/json" ||
 			request.Header.Get("Origin") != "https://game.skport.com" ||
 			request.Header.Get("Referer") != "https://game.skport.com/" ||
-			request.Header.Get("Platform") != config.Platform ||
-			request.Header.Get("Vname") != config.VName {
+			request.Header.Get("Platform") != platform ||
+			request.Header.Get("Vname") != clientVersion {
 			t.Errorf("missing protocol headers: %v", request.Header)
 		}
 		for _, header := range []string{"Priority", "Sec-Ch-Ua", "Sec-Ch-Ua-Mobile", "Sec-Ch-Ua-Platform", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site"} {
@@ -112,7 +118,7 @@ func TestHTTPFlowHeadersAndClaimAtMostOnce(t *testing.T) {
 			_, _ = io.WriteString(writer, `{"code":0,"data":{"token":"token"}}`)
 		case request.Method == http.MethodGet:
 			status.Add(1)
-			wantSign := GenerateSign(AttendancePath, "", timestamp, "token", config.Platform, config.VName)
+			wantSign := GenerateSign(AttendancePath, "", timestamp, "token", platform, clientVersion)
 			if request.Header.Get("Sign") != wantSign ||
 				request.Header.Get("Timestamp") != timestamp ||
 				request.Header.Get("Sk-Game-Role") != "role-secret" ||
@@ -126,7 +132,7 @@ func TestHTTPFlowHeadersAndClaimAtMostOnce(t *testing.T) {
 			if err != nil {
 				t.Errorf("read claim body: %v", err)
 			}
-			wantSign := GenerateSign(AttendancePath, "{}", timestamp, "token", config.Platform, config.VName)
+			wantSign := GenerateSign(AttendancePath, "{}", timestamp, "token", platform, clientVersion)
 			if string(body) != "{}" ||
 				request.Header.Get("Sign") != wantSign ||
 				request.Header.Get("Timestamp") != timestamp ||
@@ -251,7 +257,7 @@ func TestRequestBudgetExhaustion(t *testing.T) {
 	}))
 	defer server.Close()
 	client := testClient(server.URL, server.Client())
-	for i := 0; i < requestLimit; i++ {
+	for range requestLimit {
 		var response APIResponse
 		if err := client.do(context.Background(), http.MethodGet, AttendancePath, nil, "", false, &response); err != nil {
 			t.Fatal(err)
@@ -346,7 +352,7 @@ func TestStatusRetriesRegenerateSignedHeaders(t *testing.T) {
 	defer server.Close()
 	now := time.Unix(1700000000, 0)
 	client := New(
-		config.Account{Cred: config.NewSecret("cred"), GameRole: config.NewSecret("role"), Language: "en"},
+		config.Account{Credential: config.NewSecret("cred"), GameRole: config.NewSecret("role"), Language: "en"},
 		time.Second,
 		Options{
 			BaseURL: server.URL,
@@ -424,7 +430,7 @@ func TestStatusHonorsRetryAfterFor429(t *testing.T) {
 	defer server.Close()
 	var slept time.Duration
 	client := New(
-		config.Account{Cred: config.NewSecret("cred"), GameRole: config.NewSecret("role"), Language: "en"},
+		config.Account{Credential: config.NewSecret("cred"), GameRole: config.NewSecret("role"), Language: "en"},
 		time.Second,
 		Options{BaseURL: server.URL, Client: server.Client(), Now: func() time.Time { return time.Unix(1700000000, 0) }, Sleep: func(_ context.Context, delay time.Duration) error {
 			slept = delay
@@ -442,7 +448,7 @@ func TestStatusHonorsRetryAfterFor429(t *testing.T) {
 func TestClaimTimeoutIsAmbiguousAndNotRetried(t *testing.T) {
 	transport := &blockingTransport{}
 	client := New(
-		config.Account{Cred: config.NewSecret("cred"), GameRole: config.NewSecret("role"), Language: "en"},
+		config.Account{Credential: config.NewSecret("cred"), GameRole: config.NewSecret("role"), Language: "en"},
 		50*time.Millisecond,
 		Options{Client: &http.Client{Transport: transport}, Now: func() time.Time { return time.Unix(1700000000, 0) }},
 	)
@@ -473,7 +479,7 @@ func (t *blockingTransport) RoundTrip(request *http.Request) (*http.Response, er
 }
 
 func testClient(baseURL string, httpClient *http.Client) *Client {
-	account := config.Account{Name: "main", Enabled: true, Cred: config.NewSecret("cred-secret"), GameRole: config.NewSecret("role-secret"), Language: "en"}
+	account := config.Account{Name: "main", Enabled: true, Credential: config.NewSecret("cred-secret"), GameRole: config.NewSecret("role-secret"), Language: "en"}
 	return New(account, time.Second, Options{BaseURL: baseURL, Client: httpClient, Now: func() time.Time { return time.Unix(1700000000, 0) }, Sleep: func(context.Context, time.Duration) error { return nil }})
 }
 

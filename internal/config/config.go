@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -17,8 +18,6 @@ import (
 
 const (
 	AppDir         = "akef-skport-claim"
-	Platform       = "3"
-	VName          = "1.0.0"
 	MaxRandomDelay = 15 * time.Minute
 )
 
@@ -60,11 +59,11 @@ type RunConfig struct {
 }
 
 type Account struct {
-	Name     string `toml:"name"`
-	Enabled  bool   `toml:"enabled"`
-	Cred     Secret `toml:"cred"`
-	GameRole Secret `toml:"game_role"`
-	Language string `toml:"language"`
+	Name       string `toml:"name"`
+	Enabled    bool   `toml:"enabled"`
+	Credential Secret `toml:"cred"`
+	GameRole   Secret `toml:"game_role"`
+	Language   string `toml:"language"`
 }
 
 type Notifications struct {
@@ -128,11 +127,39 @@ func ResolvePath(path string) (string, error) {
 	if path != "" {
 		return filepath.Abs(path)
 	}
-	base, err := os.UserConfigDir()
+	base, err := defaultConfigDir(runtime.GOOS, os.Getenv, os.UserHomeDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve user config directory: %w", err)
 	}
 	return filepath.Join(base, AppDir, "config.toml"), nil
+}
+
+func defaultConfigDir(goos string, getenv func(string) string, userHomeDir func() (string, error)) (string, error) {
+	switch goos {
+	case "windows":
+		if base := getenv("LOCALAPPDATA"); base != "" {
+			return base, nil
+		}
+		return "", errors.New("LOCALAPPDATA is not defined")
+	case "darwin":
+		home, err := userHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, "Library", "Application Support"), nil
+	default:
+		if base := getenv("XDG_CONFIG_HOME"); base != "" {
+			if !filepath.IsAbs(base) {
+				return "", errors.New("XDG_CONFIG_HOME is not an absolute path")
+			}
+			return base, nil
+		}
+		home, err := userHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, ".config"), nil
+	}
 }
 
 func CacheDir() (string, error) {
@@ -167,7 +194,7 @@ func (c *Config) Validate() error {
 	for i := range c.Accounts {
 		account := &c.Accounts[i]
 		account.Name = strings.TrimSpace(account.Name)
-		account.Cred.trimSpace()
+		account.Credential.trimSpace()
 		account.GameRole.trimSpace()
 		if err := validateDisplayName(account.Name); err != nil {
 			return fmt.Errorf("accounts[%d].name %w", i, err)
@@ -182,10 +209,10 @@ func (c *Config) Validate() error {
 		if !languagePattern.MatchString(account.Language) {
 			return fmt.Errorf("account %q has invalid language", account.Name)
 		}
-		if account.Cred.Empty() || account.GameRole.Empty() {
+		if account.Credential.Empty() || account.GameRole.Empty() {
 			return fmt.Errorf("account %q requires cred and game_role", account.Name)
 		}
-		if err := validateRequestHeaderValue("cred", account.Cred.Expose()); err != nil {
+		if err := validateRequestHeaderValue("cred", account.Credential.Expose()); err != nil {
 			return fmt.Errorf("account %q: %w", account.Name, err)
 		}
 		if err := validateRequestHeaderValue("game_role", account.GameRole.Expose()); err != nil {
@@ -193,7 +220,7 @@ func (c *Config) Validate() error {
 		}
 		if account.Enabled {
 			enabled++
-			if isPlaceholder(account.Cred.Expose()) || isPlaceholder(account.GameRole.Expose()) {
+			if isPlaceholder(account.Credential.Expose()) || isPlaceholder(account.GameRole.Expose()) {
 				return fmt.Errorf("account %q still contains placeholder credentials", account.Name)
 			}
 		}
@@ -289,7 +316,7 @@ func ValidateTarget(target NotificationTarget) error {
 }
 
 func pathContainsPlaceholder(value string) bool {
-	for _, segment := range strings.Split(strings.Trim(value, "/"), "/") {
+	for segment := range strings.SplitSeq(strings.Trim(value, "/"), "/") {
 		if isPlaceholder(segment) {
 			return true
 		}

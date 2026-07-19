@@ -7,12 +7,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
 	processlock "github.com/hypercube-xyz/akef-skport-claim/internal/lock"
-	"github.com/hypercube-xyz/akef-skport-claim/internal/model"
+	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/skport"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/state"
 )
@@ -28,13 +29,21 @@ type fakeClient struct {
 
 type fakeNotifier struct{ calls int }
 
+type deduplicatingNotifier struct {
+	mu           sync.Mutex
+	now          time.Time
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+	sends        int
+}
+
 type lockCheckingNotifier struct {
 	t       *testing.T
 	path    string
 	checked bool
 }
 
-func (n *lockCheckingNotifier) SendAll(ctx context.Context, _ *config.Config, _ model.RunReport, _ *state.File) []error {
+func (n *lockCheckingNotifier) SendAll(ctx context.Context, _ *config.Config, _ result.Run, _ *state.Store) []error {
 	n.t.Helper()
 	acquired, ok, err := processlock.Try(ctx, n.path)
 	if err != nil || !ok {
@@ -47,9 +56,33 @@ func (n *lockCheckingNotifier) SendAll(ctx context.Context, _ *config.Config, _ 
 	return nil
 }
 
-func (f *fakeNotifier) SendAll(context.Context, *config.Config, model.RunReport, *state.File) []error {
+func (f *fakeNotifier) SendAll(context.Context, *config.Config, result.Run, *state.Store) []error {
 	f.calls++
 	return []error{errors.New("notification failed")}
+}
+
+func (n *deduplicatingNotifier) SendAll(_ context.Context, cfg *config.Config, _ result.Run, store *state.Store) []error {
+	const key = "target:account:error"
+	if store.Recent(key, n.now, cfg.Run.NotificationErrorCooldown.Duration) {
+		return nil
+	}
+
+	n.mu.Lock()
+	n.sends++
+	first := n.sends == 1
+	n.mu.Unlock()
+	store.Record(key, n.now)
+	if first {
+		close(n.firstStarted)
+		<-n.releaseFirst
+	}
+	return nil
+}
+
+func (n *deduplicatingNotifier) sendCount() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.sends
 }
 
 func (f *fakeClient) Refresh(context.Context) (string, error) { return "token", f.refreshErr }
@@ -63,38 +96,46 @@ func (f *fakeClient) ClaimOnce(context.Context, string) (skport.ClaimResponse, e
 
 func TestGuardedFlowClaimsAtMostOnce(t *testing.T) {
 	client := &fakeClient{status: attendance(`{"available":true}`), claim: claim(`{"awardIds":[]}`)}
-	result := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
-	if result.Outcome != model.Claimed || client.claims != 1 {
-		t.Fatalf("unexpected result: %#v, claims=%d", result, client.claims)
+	accountResult := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
+	if accountResult.Outcome != result.Claimed || client.claims != 1 {
+		t.Fatalf("unexpected result: %#v, claims=%d", accountResult, client.claims)
 	}
 }
 
 func TestStatusNeverClaimsAndDoneSkips(t *testing.T) {
 	for _, statusOnly := range []bool{true, false} {
 		client := &fakeClient{status: attendance(`{"available":false,"done":true}`)}
-		result := executeAccount(context.Background(), client, config.Account{Name: "main"}, statusOnly)
-		if result.Outcome != model.AlreadyClaimed || client.claims != 0 {
-			t.Fatalf("unexpected result: %#v", result)
+		accountResult := executeAccount(context.Background(), client, config.Account{Name: "main"}, statusOnly)
+		if accountResult.Outcome != result.AlreadyClaimed || client.claims != 0 {
+			t.Fatalf("unexpected result: %#v", accountResult)
 		}
 	}
 }
 
 func TestConflictingAttendanceFlagsNeverClaim(t *testing.T) {
-	client := &fakeClient{status: attendance(`{"calendar":[{"available":true,"done":true}],"hasToday":false}`)}
-	result := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
-	if result.Outcome != model.AlreadyClaimed || client.claims != 0 {
-		t.Fatalf("conflicting flags must fail closed: result=%#v claims=%d", result, client.claims)
+	client := &fakeClient{status: attendance(`{"calendar":[{"awardId":"today","available":true,"done":true}],"hasToday":false}`)}
+	accountResult := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
+	if accountResult.Outcome != result.AlreadyClaimed || client.claims != 0 {
+		t.Fatalf("conflicting flags must fail closed: result=%#v claims=%d", accountResult, client.claims)
 	}
-	if result.Summary != "conflicting attendance flags; treated as already claimed" {
-		t.Fatalf("unexpected conflict summary: %q", result.Summary)
+	if accountResult.Summary != "conflicting attendance flags; treated as already claimed" {
+		t.Fatalf("unexpected conflict summary: %q", accountResult.Summary)
+	}
+}
+
+func TestUnrelatedNestedAvailabilityNeverClaims(t *testing.T) {
+	client := &fakeClient{status: attendance(`{"hasToday":true,"resourceInfoMap":{"resource":{"available":true}}}`)}
+	accountResult := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
+	if accountResult.Outcome != result.InternalError || client.claims != 0 {
+		t.Fatalf("unrelated availability must fail closed: result=%#v claims=%d", accountResult, client.claims)
 	}
 }
 
 func TestAmbiguousClaimIsPreserved(t *testing.T) {
 	client := &fakeClient{status: attendance(`{"available":true}`), claimErr: &skport.Error{Kind: skport.ErrorAmbiguous, Op: "claim", Err: errors.New("timeout")}}
-	result := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
-	if result.Outcome != model.AmbiguousClaim || client.claims != 1 {
-		t.Fatalf("unexpected result: %#v", result)
+	accountResult := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
+	if accountResult.Outcome != result.AmbiguousClaim || client.claims != 1 {
+		t.Fatalf("unexpected result: %#v", accountResult)
 	}
 }
 
@@ -121,11 +162,11 @@ func TestExecuteContinuesAfterAccountFailure(t *testing.T) {
 			return clients[account.Name]
 		},
 	})
-	if err != nil || code != 30 || len(runReport.Results) != 2 {
+	if err != nil || code != 30 || len(runReport.Accounts) != 2 {
 		t.Fatalf("execute result: code=%d err=%v report=%#v", code, err, runReport)
 	}
-	if runReport.Results[0].Outcome != model.TransientError || runReport.Results[1].Outcome != model.AlreadyClaimed {
-		t.Fatalf("unexpected outcomes: %#v", runReport.Results)
+	if runReport.Accounts[0].Outcome != result.TransientError || runReport.Accounts[1].Outcome != result.AlreadyClaimed {
+		t.Fatalf("unexpected outcomes: %#v", runReport.Accounts)
 	}
 }
 
@@ -142,7 +183,7 @@ func TestExecuteReportsInterruptedAccountDelay(t *testing.T) {
 			return client
 		},
 	})
-	if !errors.Is(err, context.Canceled) || code != 30 || len(runReport.Results) != 1 {
+	if !errors.Is(err, context.Canceled) || code != 30 || len(runReport.Accounts) != 1 {
 		t.Fatalf("interrupted delay: code=%d err=%v report=%#v", code, err, runReport)
 	}
 }
@@ -160,16 +201,16 @@ func TestNotificationFailureNeverRepeatsClaim(t *testing.T) {
 	client := &fakeClient{status: attendance(`{"available":true}`), claim: claim(`{"awardIds":[]}`)}
 	notifier := &fakeNotifier{}
 	runReport, code, err := Execute(context.Background(), Options{
-		ConfigPath: path,
-		Account:    "first",
-		Output:     io.Discard,
-		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Notifier:   notifier,
+		ConfigPath:  path,
+		AccountName: "first",
+		Output:      io.Discard,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier:    notifier,
 		ClientFactory: func(config.Account, time.Duration) SKPortClient {
 			return client
 		},
 	})
-	if err != nil || code != 0 || client.claims != 1 || notifier.calls != 1 || runReport.Results[0].Outcome != model.Claimed {
+	if err != nil || code != 0 || client.claims != 1 || notifier.calls != 1 || runReport.Accounts[0].Outcome != result.Claimed {
 		t.Fatalf("code=%d err=%v claims=%d notifications=%d report=%#v", code, err, client.claims, notifier.calls, runReport)
 	}
 }
@@ -185,11 +226,11 @@ func TestClaimLockIsReleasedBeforeNotifications(t *testing.T) {
 	client := &fakeClient{status: attendance(`{"available":false,"done":true}`)}
 
 	_, code, err := Execute(context.Background(), Options{
-		ConfigPath: path,
-		Account:    "first",
-		Output:     io.Discard,
-		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Notifier:   notifier,
+		ConfigPath:  path,
+		AccountName: "first",
+		Output:      io.Discard,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier:    notifier,
 		ClientFactory: func(config.Account, time.Duration) SKPortClient {
 			return client
 		},
@@ -201,9 +242,9 @@ func TestClaimLockIsReleasedBeforeNotifications(t *testing.T) {
 
 func TestUnknownAttendanceStateDoesNotLookSuccessful(t *testing.T) {
 	client := &fakeClient{status: attendance(`{"unexpected":true}`)}
-	result := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
-	if result.Outcome != model.InternalError || client.claims != 0 {
-		t.Fatalf("unexpected result: %#v, claims=%d", result, client.claims)
+	accountResult := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
+	if accountResult.Outcome != result.InternalError || client.claims != 0 {
+		t.Fatalf("unexpected result: %#v, claims=%d", accountResult, client.claims)
 	}
 }
 
@@ -223,7 +264,7 @@ func TestStatusDoesNotWaitForClaimLock(t *testing.T) {
 			return client
 		},
 	})
-	if err != nil || code != 0 || len(runReport.Results) != 2 {
+	if err != nil || code != 0 || len(runReport.Accounts) != 2 {
 		t.Fatalf("status was blocked by the claim lock: code=%d err=%v report=%#v", code, err, runReport)
 	}
 }
@@ -241,16 +282,16 @@ func TestRunWaitsForClaimLockThenRechecksStatus(t *testing.T) {
 
 	client := &fakeClient{status: attendance(`{"available":false,"done":true}`)}
 	runReport, code, err := Execute(context.Background(), Options{
-		ConfigPath: path,
-		LockWait:   time.Second,
-		Output:     io.Discard,
-		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ConfigPath:    path,
+		ClaimLockWait: time.Second,
+		Output:        io.Discard,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		ClientFactory: func(config.Account, time.Duration) SKPortClient {
 			return client
 		},
 	})
 	<-released
-	if err != nil || code != 0 || len(runReport.Results) != 2 {
+	if err != nil || code != 0 || len(runReport.Accounts) != 2 {
 		t.Fatalf("run did not wait and recheck: code=%d err=%v report=%#v", code, err, runReport)
 	}
 }
@@ -262,10 +303,10 @@ func TestRunLockTimeoutIsTransientFailure(t *testing.T) {
 	defer held.Close()
 
 	_, code, err := Execute(context.Background(), Options{
-		ConfigPath: path,
-		LockWait:   30 * time.Millisecond,
-		Output:     io.Discard,
-		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ConfigPath:    path,
+		ClaimLockWait: 30 * time.Millisecond,
+		Output:        io.Discard,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		ClientFactory: func(config.Account, time.Duration) SKPortClient {
 			t.Fatal("client must not be created before the run lock is acquired")
 			return nil
@@ -273,6 +314,47 @@ func TestRunLockTimeoutIsTransientFailure(t *testing.T) {
 	})
 	if code != 30 || !errors.Is(err, processlock.ErrWaitTimeout) {
 		t.Fatalf("lock timeout must be retryable: code=%d err=%v", code, err)
+	}
+}
+
+func TestNotificationStateTransactionIsSerialized(t *testing.T) {
+	cacheDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &config.Config{Run: config.RunConfig{
+		NotificationErrorCooldown: config.Duration{Duration: time.Hour},
+	}}
+	notifier := &deduplicatingNotifier{
+		now:          time.Unix(100, 0),
+		firstStarted: make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	done := make(chan struct{}, 2)
+	run := func() {
+		sendNotifications(context.Background(), logger, cacheDir, cfg, result.Run{}, notifier)
+		done <- struct{}{}
+	}
+
+	go run()
+	<-notifier.firstStarted
+	go run()
+
+	secondFinishedBeforeStateSave := false
+	select {
+	case <-done:
+		secondFinishedBeforeStateSave = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(notifier.releaseFirst)
+	<-done
+	if !secondFinishedBeforeStateSave {
+		<-done
+	}
+
+	if secondFinishedBeforeStateSave {
+		t.Fatal("a concurrent notification transaction completed before the first state update was saved")
+	}
+	if sends := notifier.sendCount(); sends != 1 {
+		t.Fatalf("deduplicated notification was sent %d times", sends)
 	}
 }
 

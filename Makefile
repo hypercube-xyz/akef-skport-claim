@@ -8,6 +8,20 @@ COMMAND := ./cmd/akef-claim
 OUTPUT_DIR ?= bin
 SCHEDULE_TIME ?= 00:05
 
+ifeq ($(OS),Windows_NT)
+INSTALL_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/install.ps1 -Time "$(SCHEDULE_TIME)"
+UNINSTALL_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/uninstall.ps1
+INSTALL_HELP_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/install.ps1 -Help
+UNINSTALL_HELP_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/uninstall.ps1 -Help
+INSTALL_TEST_COMMAND := powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-install.ps1
+else
+INSTALL_COMMAND := ./scripts/install.sh --time "$(SCHEDULE_TIME)"
+UNINSTALL_COMMAND := ./scripts/uninstall.sh
+INSTALL_HELP_COMMAND := ./scripts/install.sh --help
+UNINSTALL_HELP_COMMAND := ./scripts/uninstall.sh --help
+INSTALL_TEST_COMMAND := :
+endif
+
 .PHONY: all help fmt fmt-check shell-check repo-check tidy tidy-check verify vet test test-race build install uninstall check ci snapshot clean
 
 all: check
@@ -35,8 +49,9 @@ fmt-check:
 
 shell-check:
 	bash -n scripts/*.sh
-	./scripts/install.sh --help >/dev/null
-	./scripts/uninstall.sh --help >/dev/null
+	$(INSTALL_HELP_COMMAND) >/dev/null
+	$(UNINSTALL_HELP_COMMAND) >/dev/null
+	$(INSTALL_TEST_COMMAND)
 
 repo-check:
 	./scripts/check-repository.sh
@@ -65,10 +80,10 @@ build:
 	$(GO) build -trimpath -o "$(OUTPUT_DIR)/$(BINARY)$${goexe}" "$(COMMAND)"
 
 install:
-	./scripts/install.sh --time "$(SCHEDULE_TIME)"
+	$(INSTALL_COMMAND)
 
 uninstall:
-	./scripts/uninstall.sh
+	$(UNINSTALL_COMMAND)
 
 check: repo-check verify tidy-check fmt-check shell-check vet test
 

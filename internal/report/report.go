@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hypercube-xyz/akef-skport-claim/internal/model"
+	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 )
 
 const (
@@ -18,10 +18,10 @@ const (
 	ExitInternal  = 50
 )
 
-func ExitCode(report model.RunReport) int {
+func ExitCode(run result.Run) int {
 	code := ExitOK
-	for _, result := range report.Results {
-		candidate := OutcomeExitCode(result.Outcome)
+	for _, account := range run.Accounts {
+		candidate := OutcomeExitCode(account.Outcome)
 		if severity(candidate) > severity(code) {
 			code = candidate
 		}
@@ -29,17 +29,17 @@ func ExitCode(report model.RunReport) int {
 	return code
 }
 
-func OutcomeExitCode(outcome model.Outcome) int {
+func OutcomeExitCode(outcome result.Outcome) int {
 	switch outcome {
-	case model.AuthExpired:
+	case result.AuthExpired:
 		return ExitAuth
-	case model.TransientError:
+	case result.TransientError:
 		return ExitTransient
-	case model.ClaimError:
+	case result.ClaimError:
 		return ExitClaim
-	case model.AmbiguousClaim:
+	case result.AmbiguousClaim:
 		return ExitAmbiguous
-	case model.InternalError:
+	case result.InternalError:
 		return ExitInternal
 	default:
 		return ExitOK
@@ -65,10 +65,10 @@ func severity(code int) int {
 	}
 }
 
-func Format(report model.RunReport) string {
+func Format(run result.Run) string {
 	hasErrors := false
-	for _, result := range report.Results {
-		if OutcomeExitCode(result.Outcome) != 0 {
+	for _, account := range run.Accounts {
+		if OutcomeExitCode(account.Outcome) != 0 {
 			hasErrors = true
 			break
 		}
@@ -79,18 +79,18 @@ func Format(report model.RunReport) string {
 	} else {
 		builder.WriteString("AKEF daily run completed\n\n")
 	}
-	for _, result := range report.Results {
-		summary := result.Summary
+	for _, account := range run.Accounts {
+		summary := account.Summary
 		if summary == "" {
-			summary = rewardSummary(result.Rewards)
+			summary = rewardSummary(account.Rewards)
 		}
-		fmt.Fprintf(&builder, "%-12s %-18s %s\n", result.Account, result.Outcome, summary)
+		fmt.Fprintf(&builder, "%-12s %-18s %s\n", account.Name, account.Outcome, summary)
 	}
-	fmt.Fprintf(&builder, "\nDuration: %s", formatDuration(report.Duration))
+	fmt.Fprintf(&builder, "\nDuration: %s", formatDuration(run.Duration))
 	return builder.String()
 }
 
-func rewardSummary(rewards []model.Reward) string {
+func rewardSummary(rewards []result.Reward) string {
 	if len(rewards) == 0 {
 		return "no reward details"
 	}

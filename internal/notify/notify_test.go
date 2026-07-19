@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
-	"github.com/hypercube-xyz/akef-skport-claim/internal/model"
+	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/state"
 )
 
@@ -20,7 +21,13 @@ func TestDiscordPayloadAndRetry(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		body, _ := io.ReadAll(request.Body)
-		if !strings.Contains(string(body), "Arknights: Endfield") || !strings.Contains(string(body), "synthetic") {
+		var payload discordWebhookPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Errorf("decode payload: %v", err)
+		}
+		if payload.Username != "Arknights: Endfield Daily Sign-in" ||
+			payload.Content != "[test]: synthetic notification test" ||
+			payload.AllowedMentions.Parse == nil {
 			t.Errorf("bad payload: %s", body)
 		}
 		if calls.Add(1) == 1 {
@@ -57,8 +64,8 @@ func TestFailedTargetDoesNotStopLaterTargetAndDeduplicatesErrors(t *testing.T) {
 		{Name: "bad", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL + "/fail"), Events: []string{"error"}},
 		{Name: "good", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL + "/good"), Events: []string{"error"}},
 	}}}
-	runReport := model.RunReport{Results: []model.AccountResult{{Account: "main", Outcome: model.TransientError}}}
-	stateFile := &state.File{Notifications: map[string]time.Time{}}
+	runReport := result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.TransientError}}}
+	stateFile := &state.Store{Notifications: map[string]time.Time{}}
 	errs := sender.SendAll(context.Background(), cfg, runReport, stateFile)
 	if len(errs) != 1 || success.Load() != 1 {
 		t.Fatalf("errs=%v success=%d", errs, success.Load())
@@ -75,9 +82,15 @@ func TestTelegramAndNtfyPayloads(t *testing.T) {
 		body, _ := io.ReadAll(request.Body)
 		switch {
 		case strings.Contains(request.URL.Path, "/bottest-token/sendMessage"):
-			telegram.Store(strings.Contains(string(body), `"chat_id":"chat-1"`) && strings.Contains(string(body), `"text":`))
+			var payload telegramMessagePayload
+			_ = json.Unmarshal(body, &payload)
+			telegram.Store(payload.ChatID == "chat-1" && payload.Text == "[test]: synthetic notification test")
 		case request.URL.Path == "/topic-safe":
-			ntfy.Store(request.Header.Get("Authorization") == "Bearer ntfy-token" && strings.Contains(string(body), "synthetic"))
+			ntfy.Store(request.Header.Get("Authorization") == "Bearer ntfy-token" &&
+				request.Header.Get("Title") == "AKEF" &&
+				request.Header.Get("Tags") == "" &&
+				request.Header.Get("Priority") == "default" &&
+				string(body) == "[test]: synthetic notification test")
 		}
 		writer.WriteHeader(200)
 	}))
@@ -94,6 +107,24 @@ func TestTelegramAndNtfyPayloads(t *testing.T) {
 	}
 }
 
+func TestTelegramPayloadStaysPlain(t *testing.T) {
+	payload := newTelegramPayload("chat", result.Run{Accounts: []result.Account{{
+		Name:    "<admin>@everyone",
+		Outcome: result.Claimed,
+		Summary: "reward <script>@user",
+	}}})
+	if payload.Text != "[<admin>@everyone]: reward <script>@user" {
+		t.Fatalf("unexpected Telegram payload: %#v", payload)
+	}
+}
+
+func TestNtfyAttentionPresentationUsesHighPriority(t *testing.T) {
+	presentation := newNtfyPresentation(result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.AuthExpired, Summary: "login required"}}})
+	if presentation.Priority != "high" || presentation.Title != "AKEF" || presentation.Body != "[main]: Error login required" {
+		t.Fatalf("unexpected ntfy presentation: %#v", presentation)
+	}
+}
+
 func TestRecentErrorDoesNotSuppressClaimedEvent(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
@@ -107,10 +138,10 @@ func TestRecentErrorDoesNotSuppressClaimedEvent(t *testing.T) {
 	cfg := &config.Config{Run: config.RunConfig{NotificationErrorCooldown: config.Duration{Duration: time.Hour}}, Notifications: config.Notifications{Targets: []config.NotificationTarget{{
 		Name: "mixed", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"claimed", "error"},
 	}}}}
-	stateFile := &state.File{Notifications: map[string]time.Time{dedupKey("mixed", "main", "error"): now.Add(-time.Minute)}}
-	runReport := model.RunReport{Results: []model.AccountResult{
-		{Account: "main", Outcome: model.TransientError},
-		{Account: "secondary", Outcome: model.Claimed},
+	stateFile := &state.Store{Notifications: map[string]time.Time{dedupKey("mixed", "main", "error"): now.Add(-time.Minute)}}
+	runReport := result.Run{Accounts: []result.Account{
+		{Name: "main", Outcome: result.TransientError},
+		{Name: "secondary", Outcome: result.Claimed},
 	}}
 	if errs := sender.SendAll(context.Background(), cfg, runReport, stateFile); len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -133,9 +164,9 @@ func TestErrorOutcomesShareDeduplicationCategory(t *testing.T) {
 	cfg := &config.Config{Run: config.RunConfig{NotificationErrorCooldown: config.Duration{Duration: time.Hour}}, Notifications: config.Notifications{Targets: []config.NotificationTarget{{
 		Name: "errors", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"error"},
 	}}}}
-	stateFile := &state.File{Notifications: map[string]time.Time{}}
-	for _, outcome := range []model.Outcome{model.TransientError, model.InternalError} {
-		runReport := model.RunReport{Results: []model.AccountResult{{Account: "main", Outcome: outcome}}}
+	stateFile := &state.Store{Notifications: map[string]time.Time{}}
+	for _, outcome := range []result.Outcome{result.TransientError, result.InternalError} {
+		runReport := result.Run{Accounts: []result.Account{{Name: "main", Outcome: outcome}}}
 		if errs := sender.SendAll(context.Background(), cfg, runReport, stateFile); len(errs) != 0 {
 			t.Fatalf("unexpected errors: %v", errs)
 		}

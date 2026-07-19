@@ -91,7 +91,7 @@ func TestSecretNeverFormatsPlaintext(t *testing.T) {
 func TestValidateLanguage(t *testing.T) {
 	cfg := defaults()
 	cfg.Version = 1
-	cfg.Accounts = []Account{{Name: "main", Enabled: true, Cred: NewSecret("x"), GameRole: NewSecret("y"), Language: "bad language"}}
+	cfg.Accounts = []Account{{Name: "main", Enabled: true, Credential: NewSecret("x"), GameRole: NewSecret("y"), Language: "bad language"}}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected language validation failure")
 	}
@@ -100,7 +100,7 @@ func TestValidateLanguage(t *testing.T) {
 func TestValidateRejectsWhitespaceOnlySecrets(t *testing.T) {
 	cfg := defaults()
 	cfg.Version = 1
-	cfg.Accounts = []Account{{Name: "main", Enabled: true, Cred: NewSecret(" \t "), GameRole: NewSecret("role")}}
+	cfg.Accounts = []Account{{Name: "main", Enabled: true, Credential: NewSecret(" \t "), GameRole: NewSecret("role")}}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "requires cred") {
 		t.Fatalf("expected empty credential error, got %v", err)
 	}
@@ -110,19 +110,19 @@ func TestValidateTrimsCopiedHeaderValuesAndRejectsHeaderInjection(t *testing.T) 
 	cfg := defaults()
 	cfg.Version = 1
 	cfg.Accounts = []Account{{
-		Name:     "main",
-		Enabled:  true,
-		Cred:     NewSecret("  credential-secret  "),
-		GameRole: NewSecret("\trole-secret\t"),
+		Name:       "main",
+		Enabled:    true,
+		Credential: NewSecret("  credential-secret  "),
+		GameRole:   NewSecret("\trole-secret\t"),
 	}}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Accounts[0].Cred.Expose() != "credential-secret" || cfg.Accounts[0].GameRole.Expose() != "role-secret" {
-		t.Fatalf("copied header values were not normalized: cred=%q role=%q", cfg.Accounts[0].Cred.Expose(), cfg.Accounts[0].GameRole.Expose())
+	if cfg.Accounts[0].Credential.Expose() != "credential-secret" || cfg.Accounts[0].GameRole.Expose() != "role-secret" {
+		t.Fatalf("copied header values were not normalized: cred=%q role=%q", cfg.Accounts[0].Credential.Expose(), cfg.Accounts[0].GameRole.Expose())
 	}
 
-	cfg.Accounts[0].Cred = NewSecret("credential\r\nInjected: value")
+	cfg.Accounts[0].Credential = NewSecret("credential\r\nInjected: value")
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "control character") {
 		t.Fatalf("expected header control-character rejection, got %v", err)
 	}
@@ -131,7 +131,7 @@ func TestValidateTrimsCopiedHeaderValuesAndRejectsHeaderInjection(t *testing.T) 
 func TestRejectsDuplicateNotificationNames(t *testing.T) {
 	cfg := defaults()
 	cfg.Version = 1
-	cfg.Accounts = []Account{{Name: "main", Enabled: true, Cred: NewSecret("x"), GameRole: NewSecret("y")}}
+	cfg.Accounts = []Account{{Name: "main", Enabled: true, Credential: NewSecret("x"), GameRole: NewSecret("y")}}
 	cfg.Notifications.Targets = []NotificationTarget{{Name: "same", Type: "telegram", BotToken: NewSecret("x"), ChatID: NewSecret("y")}, {Name: "same", Type: "ntfy", Server: "https://ntfy.sh", Topic: "safe"}}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate notification") {
 		t.Fatalf("expected duplicate target error, got %v", err)
@@ -164,6 +164,46 @@ func TestInitRefusesExistingAndForceReplacesAtomically(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigDirUsesNativePerUserLocations(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	localAppData := filepath.Join(home, "AppData", "Local")
+	xdgConfig := filepath.Join(home, "xdg-config")
+	tests := []struct {
+		name     string
+		goos     string
+		env      map[string]string
+		expected string
+	}{
+		{name: "windows", goos: "windows", env: map[string]string{"LOCALAPPDATA": localAppData}, expected: localAppData},
+		{name: "linux-xdg", goos: "linux", env: map[string]string{"XDG_CONFIG_HOME": xdgConfig}, expected: xdgConfig},
+		{name: "linux-default", goos: "linux", expected: filepath.Join(home, ".config")},
+		{name: "macos", goos: "darwin", expected: filepath.Join(home, "Library", "Application Support")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := defaultConfigDir(test.goos, func(key string) string { return test.env[key] }, func() (string, error) { return home, nil })
+			if err != nil || got != test.expected {
+				t.Fatalf("default config directory: got=%q expected=%q err=%v", got, test.expected, err)
+			}
+		})
+	}
+}
+
+func TestDefaultConfigDirRejectsMissingOrRelativeEnvironmentPaths(t *testing.T) {
+	home := func() (string, error) { return filepath.Join(t.TempDir(), "home"), nil }
+	if _, err := defaultConfigDir("windows", func(string) string { return "" }, home); err == nil {
+		t.Fatal("missing LOCALAPPDATA was accepted")
+	}
+	if _, err := defaultConfigDir("linux", func(key string) string {
+		if key == "XDG_CONFIG_HOME" {
+			return "relative"
+		}
+		return ""
+	}, home); err == nil {
+		t.Fatal("relative XDG_CONFIG_HOME was accepted")
+	}
+}
+
 func TestEmbeddedExampleMatchesRepositoryFile(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "config.example.toml"))
 	if err != nil {
@@ -177,7 +217,7 @@ func TestEmbeddedExampleMatchesRepositoryFile(t *testing.T) {
 func TestValidateRejectsControlCharactersAndExcessiveRandomDelay(t *testing.T) {
 	cfg := defaults()
 	cfg.Version = 1
-	cfg.Accounts = []Account{{Name: "main\nforged", Enabled: true, Cred: NewSecret("x"), GameRole: NewSecret("y")}}
+	cfg.Accounts = []Account{{Name: "main\nforged", Enabled: true, Credential: NewSecret("x"), GameRole: NewSecret("y")}}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "control") {
 		t.Fatalf("expected control-character error, got %v", err)
 	}

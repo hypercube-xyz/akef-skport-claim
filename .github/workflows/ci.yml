@@ -200,6 +200,28 @@ jobs:
             -o "${RUNNER_TEMP}/${{ matrix.binary }}" \
             ./cmd/akef-claim
 
+      - name: Validate Windows installers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $parseErrors = foreach ($script in 'scripts/install.ps1', 'scripts/uninstall.ps1') {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            $errors
+          }
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          ./scripts/install.ps1 -Help
+          ./scripts/uninstall.ps1 -Help
+          ./scripts/test-install.ps1
+
       - name: Verify clean source tree
         run: |
           set -euo pipefail
