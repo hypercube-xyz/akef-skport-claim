@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,14 @@ type fakeClient struct {
 }
 
 type fakeNotifier struct{ calls int }
+
+type deduplicatingNotifier struct {
+	mu           sync.Mutex
+	now          time.Time
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+	sends        int
+}
 
 type lockCheckingNotifier struct {
 	t       *testing.T
@@ -50,6 +59,30 @@ func (n *lockCheckingNotifier) SendAll(ctx context.Context, _ *config.Config, _ 
 func (f *fakeNotifier) SendAll(context.Context, *config.Config, result.Run, *state.Store) []error {
 	f.calls++
 	return []error{errors.New("notification failed")}
+}
+
+func (n *deduplicatingNotifier) SendAll(_ context.Context, cfg *config.Config, _ result.Run, store *state.Store) []error {
+	const key = "target:account:error"
+	if store.Recent(key, n.now, cfg.Run.NotificationErrorCooldown.Duration) {
+		return nil
+	}
+
+	n.mu.Lock()
+	n.sends++
+	first := n.sends == 1
+	n.mu.Unlock()
+	store.Record(key, n.now)
+	if first {
+		close(n.firstStarted)
+		<-n.releaseFirst
+	}
+	return nil
+}
+
+func (n *deduplicatingNotifier) sendCount() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.sends
 }
 
 func (f *fakeClient) Refresh(context.Context) (string, error) { return "token", f.refreshErr }
@@ -273,6 +306,47 @@ func TestRunLockTimeoutIsTransientFailure(t *testing.T) {
 	})
 	if code != 30 || !errors.Is(err, processlock.ErrWaitTimeout) {
 		t.Fatalf("lock timeout must be retryable: code=%d err=%v", code, err)
+	}
+}
+
+func TestNotificationStateTransactionIsSerialized(t *testing.T) {
+	cacheDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &config.Config{Run: config.RunConfig{
+		NotificationErrorCooldown: config.Duration{Duration: time.Hour},
+	}}
+	notifier := &deduplicatingNotifier{
+		now:          time.Unix(100, 0),
+		firstStarted: make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	done := make(chan struct{}, 2)
+	run := func() {
+		sendNotifications(context.Background(), logger, cacheDir, cfg, result.Run{}, notifier)
+		done <- struct{}{}
+	}
+
+	go run()
+	<-notifier.firstStarted
+	go run()
+
+	secondFinishedBeforeStateSave := false
+	select {
+	case <-done:
+		secondFinishedBeforeStateSave = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(notifier.releaseFirst)
+	<-done
+	if !secondFinishedBeforeStateSave {
+		<-done
+	}
+
+	if secondFinishedBeforeStateSave {
+		t.Fatal("a concurrent notification transaction completed before the first state update was saved")
+	}
+	if sends := notifier.sendCount(); sends != 1 {
+		t.Fatalf("deduplicated notification was sent %d times", sends)
 	}
 }
 
