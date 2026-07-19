@@ -69,21 +69,17 @@ func (r AttendanceResponse) root() any {
 	return value
 }
 
-// State evaluates available/done flags per object rather than independently
-// across the whole document. This distinction matters when historical calendar
-// entries are done while today's entry is available. A clean available item wins
-// over historical done items only when the response contains no contradictory
-// object; any same-object available/done conflict fails the whole response closed.
+// State evaluates the root compatibility shape and nested attendance items rather
+// than accepting available/done fields from arbitrary metadata. This distinction
+// matters when historical calendar entries are done while today's entry is
+// available, and prevents unrelated nested objects from triggering a claim.
 func (r AttendanceResponse) State() AttendanceState {
 	root := r.root()
 	state := AttendanceState{}
-	if object, ok := root.(map[string]any); ok {
-		state.HasToday, state.HasTodayKnown = directBool(object, hasTodayKeys)
-	}
 
 	var cleanAvailable bool
 	var anyDone bool
-	walkObjects(root, func(object map[string]any) {
+	evaluate := func(object map[string]any) {
 		available, availableKnown := directBool(object, availableKeys)
 		done, doneKnown := directBool(object, doneKeys)
 		state.AvailableKnown = state.AvailableKnown || availableKnown
@@ -101,7 +97,18 @@ func (r AttendanceResponse) State() AttendanceState {
 		if doneKnown && done {
 			anyDone = true
 		}
-	})
+	}
+
+	if object, ok := root.(map[string]any); ok {
+		state.HasToday, state.HasTodayKnown = directBool(object, hasTodayKeys)
+		// Some observed and legacy response shapes expose state directly on data.
+		evaluate(object)
+		for _, nested := range object {
+			walkAttendanceItems(nested, evaluate)
+		}
+	} else {
+		walkAttendanceItems(root, evaluate)
+	}
 
 	switch {
 	case state.Conflict:
@@ -206,16 +213,18 @@ func directBool(object map[string]any, keys map[string]struct{}) (bool, bool) {
 	return false, knownFalse
 }
 
-func walkObjects(value any, visit func(map[string]any)) {
+func walkAttendanceItems(value any, visit func(map[string]any)) {
 	switch typed := value.(type) {
 	case map[string]any:
-		visit(typed)
+		if awardID, ok := typed["awardId"].(string); ok && awardID != "" {
+			visit(typed)
+		}
 		for _, nested := range typed {
-			walkObjects(nested, visit)
+			walkAttendanceItems(nested, visit)
 		}
 	case []any:
 		for _, nested := range typed {
-			walkObjects(nested, visit)
+			walkAttendanceItems(nested, visit)
 		}
 	}
 }

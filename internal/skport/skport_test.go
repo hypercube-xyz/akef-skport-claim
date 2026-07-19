@@ -74,6 +74,12 @@ func TestResponseFixtures(t *testing.T) {
 	if rewards := mixedConflict.AvailableRewards(); len(rewards) != 0 {
 		t.Fatalf("a conflicting response exposed claimable rewards: %#v", rewards)
 	}
+
+	metadata := AttendanceResponse{Code: 0, Data: json.RawMessage(`{"hasToday":true,"resourceInfoMap":{"resource":{"available":true,"done":false}}}`)}
+	metadataState := metadata.State()
+	if metadataState.Available || metadataState.AvailableKnown || metadataState.DoneKnown || !metadataState.SessionValid {
+		t.Fatalf("unrelated metadata changed attendance state: state=%+v", metadataState)
+	}
 	var claim ClaimResponse
 	readFixture(t, "claim_success_with_rewards.json", &claim)
 	if claim.Classify() != ClaimSuccess || claim.Rewards()[0].Summary() != "Talosian Credit Notes|T-Creds x2000" {

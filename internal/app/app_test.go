@@ -113,13 +113,21 @@ func TestStatusNeverClaimsAndDoneSkips(t *testing.T) {
 }
 
 func TestConflictingAttendanceFlagsNeverClaim(t *testing.T) {
-	client := &fakeClient{status: attendance(`{"calendar":[{"available":true,"done":true}],"hasToday":false}`)}
+	client := &fakeClient{status: attendance(`{"calendar":[{"awardId":"today","available":true,"done":true}],"hasToday":false}`)}
 	accountResult := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
 	if accountResult.Outcome != result.AlreadyClaimed || client.claims != 0 {
 		t.Fatalf("conflicting flags must fail closed: result=%#v claims=%d", accountResult, client.claims)
 	}
 	if accountResult.Summary != "conflicting attendance flags; treated as already claimed" {
 		t.Fatalf("unexpected conflict summary: %q", accountResult.Summary)
+	}
+}
+
+func TestUnrelatedNestedAvailabilityNeverClaims(t *testing.T) {
+	client := &fakeClient{status: attendance(`{"hasToday":true,"resourceInfoMap":{"resource":{"available":true}}}`)}
+	accountResult := executeAccount(context.Background(), client, config.Account{Name: "main"}, false)
+	if accountResult.Outcome != result.InternalError || client.claims != 0 {
+		t.Fatalf("unrelated availability must fail closed: result=%#v claims=%d", accountResult, client.claims)
 	}
 }
 
