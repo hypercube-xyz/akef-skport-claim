@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
-	"github.com/hypercube-xyz/akef-skport-claim/internal/report"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/state"
 )
@@ -79,7 +78,6 @@ func (s *Sender) SendAll(ctx context.Context, cfg *config.Config, runReport resu
 }
 
 func (s *Sender) sendReport(ctx context.Context, cfg *config.Config, runReport result.Run, store *state.Store) []error {
-	text := report.Format(runReport)
 	var errs []error
 	for _, target := range cfg.Notifications.Targets {
 		if !target.Enabled {
@@ -100,7 +98,7 @@ func (s *Sender) sendReport(ctx context.Context, cfg *config.Config, runReport r
 		if allRecent {
 			continue
 		}
-		if err := s.sendTarget(ctx, target, text); err != nil {
+		if err := s.sendTarget(ctx, target, runReport); err != nil {
 			errs = append(errs, fmt.Errorf("notification target %q failed: %w", target.Name, err))
 			continue
 		}
@@ -113,7 +111,7 @@ func (s *Sender) sendReport(ctx context.Context, cfg *config.Config, runReport r
 
 func (s *Sender) SendTest(ctx context.Context, target config.NotificationTarget) error {
 	reportValue := result.Run{Duration: 10 * time.Millisecond, Accounts: []result.Account{{Name: "test", Outcome: result.Claimed, Summary: "synthetic notification test"}}}
-	return s.sendTarget(ctx, target, report.Format(reportValue))
+	return s.sendTarget(ctx, target, reportValue)
 }
 
 func eventFor(outcome result.Outcome) string {

@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +21,13 @@ func TestDiscordPayloadAndRetry(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		body, _ := io.ReadAll(request.Body)
-		if !strings.Contains(string(body), "Arknights: Endfield") || !strings.Contains(string(body), "synthetic") {
+		var payload discordWebhookPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Errorf("decode payload: %v", err)
+		}
+		if payload.Username != "Arknights: Endfield Daily Sign-in" ||
+			payload.Content != "[test]: synthetic notification test" ||
+			payload.AllowedMentions.Parse == nil {
 			t.Errorf("bad payload: %s", body)
 		}
 		if calls.Add(1) == 1 {
@@ -75,9 +82,15 @@ func TestTelegramAndNtfyPayloads(t *testing.T) {
 		body, _ := io.ReadAll(request.Body)
 		switch {
 		case strings.Contains(request.URL.Path, "/bottest-token/sendMessage"):
-			telegram.Store(strings.Contains(string(body), `"chat_id":"chat-1"`) && strings.Contains(string(body), `"text":`))
+			var payload telegramMessagePayload
+			_ = json.Unmarshal(body, &payload)
+			telegram.Store(payload.ChatID == "chat-1" && payload.Text == "[test]: synthetic notification test")
 		case request.URL.Path == "/topic-safe":
-			ntfy.Store(request.Header.Get("Authorization") == "Bearer ntfy-token" && strings.Contains(string(body), "synthetic"))
+			ntfy.Store(request.Header.Get("Authorization") == "Bearer ntfy-token" &&
+				request.Header.Get("Title") == "AKEF" &&
+				request.Header.Get("Tags") == "" &&
+				request.Header.Get("Priority") == "default" &&
+				string(body) == "[test]: synthetic notification test")
 		}
 		writer.WriteHeader(200)
 	}))
@@ -91,6 +104,24 @@ func TestTelegramAndNtfyPayloads(t *testing.T) {
 	}
 	if !telegram.Load() || !ntfy.Load() {
 		t.Fatalf("telegram=%v ntfy=%v", telegram.Load(), ntfy.Load())
+	}
+}
+
+func TestTelegramPayloadStaysPlain(t *testing.T) {
+	payload := newTelegramPayload("chat", result.Run{Accounts: []result.Account{{
+		Name:    "<admin>@everyone",
+		Outcome: result.Claimed,
+		Summary: "reward <script>@user",
+	}}})
+	if payload.Text != "[<admin>@everyone]: reward <script>@user" {
+		t.Fatalf("unexpected Telegram payload: %#v", payload)
+	}
+}
+
+func TestNtfyAttentionPresentationUsesHighPriority(t *testing.T) {
+	presentation := newNtfyPresentation(result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.AuthExpired, Summary: "login required"}}})
+	if presentation.Priority != "high" || presentation.Title != "AKEF" || presentation.Body != "[main]: Error login required" {
+		t.Fatalf("unexpected ntfy presentation: %#v", presentation)
 	}
 }
 

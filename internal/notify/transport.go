@@ -15,9 +15,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
+	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 )
 
-func (s *Sender) sendTarget(ctx context.Context, target config.NotificationTarget, text string) error {
+func (s *Sender) sendTarget(ctx context.Context, target config.NotificationTarget, runReport result.Run) error {
 	var endpoint string
 	var body []byte
 	var encodeErr error
@@ -25,17 +26,11 @@ func (s *Sender) sendTarget(ctx context.Context, target config.NotificationTarge
 	switch target.Type {
 	case "discord":
 		endpoint = target.Webhook.Expose()
-		body, encodeErr = json.Marshal(map[string]string{
-			"username": "Arknights: Endfield Daily Sign-in",
-			"content":  truncateUTF8(text, 2000),
-		})
+		body, encodeErr = json.Marshal(newDiscordPayload(runReport))
 		headers.Set("Content-Type", "application/json")
 	case "telegram":
 		endpoint = s.telegramBaseURL + "/bot" + url.PathEscape(target.BotToken.Expose()) + "/sendMessage"
-		body, encodeErr = json.Marshal(map[string]string{
-			"chat_id": target.ChatID.Expose(),
-			"text":    truncateUTF8(text, 4096),
-		})
+		body, encodeErr = json.Marshal(newTelegramPayload(target.ChatID.Expose(), runReport))
 		headers.Set("Content-Type", "application/json")
 	case "ntfy":
 		u, err := url.Parse(target.Server)
@@ -44,8 +39,11 @@ func (s *Sender) sendTarget(ctx context.Context, target config.NotificationTarge
 		}
 		u.Path = path.Join(u.Path, target.Topic)
 		endpoint = u.String()
-		body = []byte(text)
+		presentation := newNtfyPresentation(runReport)
+		body = []byte(presentation.Body)
 		headers.Set("Content-Type", "text/plain; charset=utf-8")
+		headers.Set("Title", presentation.Title)
+		headers.Set("Priority", presentation.Priority)
 		if !target.Token.Empty() {
 			headers.Set("Authorization", "Bearer "+target.Token.Expose())
 		}
@@ -56,15 +54,15 @@ func (s *Sender) sendTarget(ctx context.Context, target config.NotificationTarge
 		return errors.New("failed to encode notification payload")
 	}
 
-	targetCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	return s.postWithRetry(targetCtx, endpoint, headers, body)
+	return s.postWithRetry(ctx, endpoint, headers, body)
 }
 
 func (s *Sender) postWithRetry(ctx context.Context, endpoint string, headers http.Header, body []byte) error {
 	for attempt := range 2 {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		attemptCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
+			cancel()
 			return errors.New("failed to create request")
 		}
 		req.Header = headers.Clone()
@@ -73,6 +71,7 @@ func (s *Sender) postWithRetry(ctx context.Context, endpoint string, headers htt
 			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 			_ = response.Body.Close()
 		}
+		cancel()
 
 		retryable := err != nil
 		if err == nil && response != nil {
