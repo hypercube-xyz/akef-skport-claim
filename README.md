@@ -1,5 +1,13 @@
 # AKEF SKPort Claim
 
+[![CI](https://github.com/hypercube-xyz/akef-skport-claim/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hypercube-xyz/akef-skport-claim/actions/workflows/ci.yml)
+[![Go version](https://img.shields.io/github/go-mod/go-version/hypercube-xyz/akef-skport-claim)](https://go.dev/dl/)
+[![Go Reference](https://pkg.go.dev/badge/github.com/hypercube-xyz/akef-skport-claim.svg)](https://pkg.go.dev/github.com/hypercube-xyz/akef-skport-claim)
+[![Go Report Card](https://goreportcard.com/badge/github.com/hypercube-xyz/akef-skport-claim)](https://goreportcard.com/report/github.com/hypercube-xyz/akef-skport-claim)
+[![Latest release](https://img.shields.io/github/v/release/hypercube-xyz/akef-skport-claim)](https://github.com/hypercube-xyz/akef-skport-claim/releases)
+[![License](https://img.shields.io/github/license/hypercube-xyz/akef-skport-claim)](LICENSE)
+[![Renovate enabled](https://img.shields.io/badge/renovate-enabled-brightgreen.svg?logo=renovatebot)](https://docs.renovatebot.com/)
+
 `akef-claim` is an unofficial, local-only command-line tool for checking and claiming Arknights: Endfield SKPORT daily attendance. It is not affiliated with Hypergryph or Gryphline. Automated use may carry account risk; use it sparingly and at your own risk.
 
 The tool runs on your computer, stores no credentials remotely, exposes no server, and includes no captcha solving, browser automation, anti-bot bypass, fingerprint spoofing, proxy rotation, or cloud claim workflow.
