@@ -3,7 +3,6 @@
 [![CI](https://github.com/hypercube-xyz/akef-skport-claim/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hypercube-xyz/akef-skport-claim/actions/workflows/ci.yml)
 [![Go version](https://img.shields.io/github/go-mod/go-version/hypercube-xyz/akef-skport-claim)](https://go.dev/dl/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/hypercube-xyz/akef-skport-claim.svg)](https://pkg.go.dev/github.com/hypercube-xyz/akef-skport-claim)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hypercube-xyz/akef-skport-claim)](https://goreportcard.com/report/github.com/hypercube-xyz/akef-skport-claim)
 [![Latest release](https://img.shields.io/github/v/release/hypercube-xyz/akef-skport-claim)](https://github.com/hypercube-xyz/akef-skport-claim/releases)
 [![License](https://img.shields.io/github/license/hypercube-xyz/akef-skport-claim)](LICENSE)
 [![Renovate enabled](https://img.shields.io/badge/renovate-enabled-brightgreen.svg?logo=renovatebot)](https://docs.renovatebot.com/)
@@ -22,6 +21,14 @@ Download and extract the archive for your operating system. Every release archiv
 
 - Windows: `akef-claim.exe`
 - Linux/macOS: `akef-claim`
+
+Before installation, compare the archive's SHA-256 digest with the matching entry in the release's `checksums.txt`. For example:
+
+```bash
+sha256sum -c checksums.txt --ignore-missing
+```
+
+On Windows PowerShell, compare `Get-FileHash .\akef-claim_*.zip -Algorithm SHA256` with the published checksum.
 
 On Windows, use the native PowerShell installer:
 
@@ -181,13 +188,16 @@ The repository uses Bash-backed Make targets:
 make repo-check
 make check
 make ci
+make lint
+make vuln
+make coverage
 make build
 make install SCHEDULE_TIME=00:05
 make uninstall
 make snapshot
 ```
 
-`make repo-check` rejects secret-bearing or stale tracked files. `make check` also verifies modules, tidy state, script syntax, vet, and tests. `make ci` additionally runs the race detector and builds the current platform. `make install` and `make uninstall` select the native PowerShell scripts on Windows and Bash scripts on Linux/macOS. `make snapshot` requires GoReleaser and creates local release archives without publishing them.
+`make repo-check` rejects secret-bearing or stale tracked files. `make check` also verifies modules, tidy state, script syntax, golangci-lint, vet, and tests. `make ci` additionally scans reachable Go code for known vulnerabilities, runs the race detector, enforces at least 95% statement coverage, and builds the current platform. `make lint` requires the golangci-lint version recorded in `.golangci-lint-version`; follow the [official installation guide](https://golangci-lint.run/docs/welcome/install/local/) to install its binary. `make vuln` runs the `govulncheck` tool pinned in `go.mod`. `make coverage` writes `coverage.out` and fails below `COVERAGE_MIN` (default `95.0`). `make install` and `make uninstall` select the native PowerShell scripts on Windows and Bash scripts on Linux/macOS. `make snapshot` requires GoReleaser and creates local release archives without publishing them.
 
 ## Troubleshooting and reporting
 

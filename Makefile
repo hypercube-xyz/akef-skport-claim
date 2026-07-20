@@ -3,6 +3,9 @@ SHELL := bash
 
 GO ?= go
 GORELEASER ?= goreleaser
+GOLANGCI_LINT ?= golangci-lint
+COVERAGE_MIN ?= 95.0
+COVERAGE_PROFILE ?= coverage.out
 BINARY := akef-claim
 COMMAND := ./cmd/akef-claim
 OUTPUT_DIR ?= bin
@@ -22,7 +25,7 @@ UNINSTALL_HELP_COMMAND := ./scripts/uninstall.sh --help
 INSTALL_TEST_COMMAND := :
 endif
 
-.PHONY: all help fmt fmt-check shell-check repo-check tidy tidy-check verify vet test test-race build install uninstall check ci snapshot clean
+.PHONY: all help fmt fmt-check shell-check repo-check tidy tidy-check verify lint vet vuln test test-race coverage build install uninstall check ci snapshot clean
 
 all: check
 
@@ -31,6 +34,9 @@ help:
 		'make check      Verify modules, formatting, Bash syntax, vet, and tests' \
 		'make ci         Run the complete local CI suite, including the race detector' \
 		'make build      Build the current-platform executable under bin/' \
+		'make lint       Run the pinned golangci-lint configuration' \
+		'make vuln       Scan reachable Go code for known vulnerabilities' \
+		'make coverage   Enforce at least 95% statement coverage' \
 		'make install    Install the binary and local scheduler (SCHEDULE_TIME=HH:MM)' \
 		'make uninstall  Remove the binary and local scheduler' \
 		'make repo-check Check tracked-file hygiene and credential patterns' \
@@ -48,7 +54,8 @@ fmt-check:
 	fi
 
 shell-check:
-	bash -n scripts/*.sh
+	bash -n scripts/*.sh scripts/*.bash
+	bash scripts/test-cron-blocks.bash
 	$(INSTALL_HELP_COMMAND) >/dev/null
 	$(UNINSTALL_HELP_COMMAND) >/dev/null
 	$(INSTALL_TEST_COMMAND)
@@ -65,14 +72,24 @@ tidy-check:
 verify:
 	$(GO) mod verify
 
+lint:
+	$(GOLANGCI_LINT) run
+
 vet:
 	$(GO) vet ./...
+
+vuln:
+	$(GO) tool govulncheck ./...
 
 test:
 	$(GO) test -count=1 ./...
 
 test-race:
 	$(GO) test -race -count=1 ./...
+
+coverage:
+	$(GO) test -count=1 -coverprofile="$(COVERAGE_PROFILE)" ./...
+	@awk -v minimum="$(COVERAGE_MIN)" 'NR > 1 { total += $$(NF-1); if ($$NF > 0) covered += $$(NF-1) } END { actual = 100 * covered / total; if (actual < minimum) { printf "statement coverage %.4f%% is below required %.4f%%\n", actual, minimum > "/dev/stderr"; exit 1 } printf "statement coverage %.4f%% meets required %.4f%%\n", actual, minimum }' "$(COVERAGE_PROFILE)"
 
 build:
 	@mkdir -p "$(OUTPUT_DIR)"; \
@@ -85,9 +102,9 @@ install:
 uninstall:
 	$(UNINSTALL_COMMAND)
 
-check: repo-check verify tidy-check fmt-check shell-check vet test
+check: repo-check verify tidy-check fmt-check shell-check lint vet test
 
-ci: repo-check verify tidy-check fmt-check shell-check vet test-race build
+ci: repo-check verify tidy-check fmt-check shell-check lint vet vuln test-race coverage build
 
 snapshot:
 	command -v "$(GORELEASER)" >/dev/null

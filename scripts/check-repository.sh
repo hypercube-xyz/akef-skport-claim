@@ -50,6 +50,8 @@ is_placeholder() {
 check_required_files() {
   local required=(
     '.gitignore'
+    '.golangci-lint-version'
+    '.golangci.yml'
     'go.mod'
     'go.sum'
     'Makefile'
@@ -92,22 +94,17 @@ check_license_files() {
 }
 
 check_go_module() {
-  local module_path go_version toolchain
+  local module_path go_version
 
   module_path="$(awk '$1 == "module" { print $2; exit }' go.mod)"
   go_version="$(awk '$1 == "go" { print $2; exit }' go.mod)"
-  toolchain="$(awk '$1 == "toolchain" { print $2; exit }' go.mod)"
 
   if [[ "$module_path" != "$EXPECTED_MODULE" ]]; then
     fail "go.mod module must be $EXPECTED_MODULE (found: ${module_path:-missing})"
   fi
 
-  if [[ "$go_version" != '1.26.0' ]]; then
-    fail "go.mod must declare 'go 1.26.0' (found: ${go_version:-missing})"
-  fi
-
-  if [[ ! "$toolchain" =~ ^go1\.26\.[0-9]+$ ]]; then
-    fail "go.mod toolchain must be a Go 1.26 patch release (found: ${toolchain:-missing})"
+  if [[ ! "$go_version" =~ ^1\.26\.[0-9]+$ ]]; then
+    fail "go.mod must declare a Go 1.26 patch release (found: ${go_version:-missing})"
   fi
 
   ok 'Go module identity and version checked'

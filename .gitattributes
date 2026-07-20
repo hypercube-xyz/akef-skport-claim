@@ -2,9 +2,12 @@
 
 *.go text eol=lf
 *.md text eol=lf
+*.bash text eol=lf
 *.sh text eol=lf
 *.ps1 text eol=crlf
 *.toml text eol=lf
+go.sum text eol=lf
+.golangci-lint-version text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
 Makefile text eol=lf
