@@ -44,9 +44,43 @@ jobs:
         with:
           version-file: .golangci-lint-version
 
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-2025
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate PowerShell installers
+        shell: pwsh
+        run: |
+          $parseErrors = foreach ($script in 'scripts/install.ps1', 'scripts/uninstall.ps1') {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            $errors
+          }
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          ./scripts/install.ps1 -Help
+          ./scripts/uninstall.ps1 -Help
+          ./scripts/test-install.ps1
+
   release:
     name: GoReleaser
-    needs: lint
+    needs:
+      - lint
+      - windows-installer
     if: github.repository == 'hypercube-xyz/akef-skport-claim'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -85,27 +119,6 @@ jobs:
             printf 'Release tag %s does not point to a commit on main.\n' "${RELEASE_TAG}" >&2
             exit 1
           fi
-
-      - name: Validate PowerShell installers
-        shell: pwsh
-        run: |
-          $parseErrors = foreach ($script in 'scripts/install.ps1', 'scripts/uninstall.ps1') {
-            $tokens = $null
-            $errors = $null
-            [void][System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path $script),
-              [ref]$tokens,
-              [ref]$errors
-            )
-            $errors
-          }
-          if ($parseErrors.Count -gt 0) {
-            $parseErrors | ForEach-Object { Write-Error $_.Message }
-            exit 1
-          }
-          ./scripts/install.ps1 -Help
-          ./scripts/uninstall.ps1 -Help
-          ./scripts/test-install.ps1
 
       - name: Verify source
         run: |
