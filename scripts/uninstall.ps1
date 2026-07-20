@@ -7,8 +7,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$taskName = 'Arknights: Endfield SKPORT Daily Claim'
-$legacyTaskName = 'AKEF SKPort Daily Claim'
+$taskName = 'Arknights Endfield SKPORT Daily Claim'
+$legacyTaskNames = @('AKEF SKPort Daily Claim')
 $appDirectory = 'akef-skport-claim'
 
 if ($Help) {
@@ -21,7 +21,7 @@ try {
         throw 'LOCALAPPDATA is not defined'
     }
 
-    foreach ($scheduledTaskName in $taskName, $legacyTaskName) {
+    foreach ($scheduledTaskName in @($taskName) + $legacyTaskNames) {
         $existingTask = Get-ScheduledTask -TaskName $scheduledTaskName -ErrorAction SilentlyContinue
         if ($null -ne $existingTask) {
             try {

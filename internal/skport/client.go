@@ -114,8 +114,8 @@ func New(account config.Account, timeout time.Duration, options Options) *Client
 }
 
 func (c *Client) Refresh(ctx context.Context) (string, error) {
-	var response RefreshResponse
-	if err := c.retry(ctx, http.MethodGet, RefreshPath, func() http.Header { return commonHeaders(c.account) }, "", 2, &response); err != nil {
+	response, err := retryJSON[RefreshResponse](c, ctx, http.MethodGet, RefreshPath, func() http.Header { return commonHeaders(c.account) }, "", 2)
+	if err != nil {
 		return "", err
 	}
 	if response.Code != 0 {
@@ -132,12 +132,8 @@ func (c *Client) Refresh(ctx context.Context) (string, error) {
 }
 
 func (c *Client) Status(ctx context.Context, token string) (AttendanceResponse, error) {
-	var response AttendanceResponse
 	headers := func() http.Header { return signedHeaders(c.account, token, AttendancePath, "", c.now()) }
-	if err := c.retry(ctx, http.MethodGet, AttendancePath, headers, "", 1, &response); err != nil {
-		return response, err
-	}
-	return response, nil
+	return retryJSON[AttendanceResponse](c, ctx, http.MethodGet, AttendancePath, headers, "", 1)
 }
 
 func (c *Client) ClaimOnce(ctx context.Context, token string) (ClaimResponse, error) {
@@ -154,27 +150,32 @@ func (c *Client) ClaimOnce(ctx context.Context, token string) (ClaimResponse, er
 	return response, err
 }
 
-func (c *Client) retry(ctx context.Context, method, path string, headers func() http.Header, body string, reservedRequests int, target any) error {
+// retryJSON decodes every response into a fresh value. A failed json.Unmarshal
+// may partially populate its target, so reusing a target across attempts could
+// leak data from a failed response into a later successful one.
+func retryJSON[T any](c *Client, ctx context.Context, method, path string, headers func() http.Header, body string, reservedRequests int) (T, error) {
+	var zero T
 	delay := time.Second
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		err := c.do(ctx, method, path, headers(), body, false, target)
+		var response T
+		err := c.do(ctx, method, path, headers(), body, false, &response)
 		if err == nil {
-			return nil
+			return response, nil
 		}
 		var typed *Error
 		if !errors.As(err, &typed) || typed.Kind != ErrorTransient || !typed.Retryable || attempt == maxAttempts || c.remainingRequests() <= reservedRequests {
-			return err
+			return zero, err
 		}
 		wait := delay
 		if typed.RetryAfter > 0 {
 			wait = min(typed.RetryAfter, 30*time.Second)
 		}
 		if err := c.sleep(ctx, wait); err != nil {
-			return &Error{Kind: ErrorTransient, Op: path, Err: err}
+			return zero, &Error{Kind: ErrorTransient, Op: path, Err: err}
 		}
 		delay *= 2
 	}
-	return &Error{Kind: ErrorInternal, Op: path, Err: errors.New("retry loop exited unexpectedly")}
+	return zero, &Error{Kind: ErrorInternal, Op: path, Err: errors.New("retry loop exited unexpectedly")}
 }
 
 func (c *Client) remainingRequests() int {
@@ -266,7 +267,7 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 		if claim {
 			kind = ErrorAmbiguous
 		}
-		return &Error{Kind: kind, Op: path, Err: errors.New("malformed JSON response")}
+		return &Error{Kind: kind, Op: path, Err: errors.New("malformed JSON response"), Retryable: !claim}
 	}
 	return nil
 }

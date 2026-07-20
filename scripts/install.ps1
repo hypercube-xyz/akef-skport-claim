@@ -7,8 +7,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$taskName = 'Arknights: Endfield SKPORT Daily Claim'
-$legacyTaskName = 'AKEF SKPort Daily Claim'
+$taskName = 'Arknights Endfield SKPORT Daily Claim'
+$legacyTaskNames = @('AKEF SKPort Daily Claim')
 $appDirectory = 'akef-skport-claim'
 
 function Invoke-AkefClaim {
@@ -75,6 +75,10 @@ function Install-ScheduledClaim {
         [Parameter(Mandatory = $true)][datetime]$At
     )
 
+    if ($taskName.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+        throw "Scheduled task name contains an invalid Windows filename character: $taskName"
+    }
+
     foreach ($command in 'Get-ScheduledTask', 'Export-ScheduledTask', 'Register-ScheduledTask', 'Unregister-ScheduledTask') {
         if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
             throw "$command is unavailable; Task Scheduler PowerShell commands are required"
@@ -130,14 +134,16 @@ function Install-ScheduledClaim {
         throw "Failed to install the scheduled task: $($installError.Exception.Message)"
     }
 
-    $legacyTask = Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
-    if ($null -ne $legacyTask) {
-        try {
-            Stop-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
-            Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false
-        }
-        catch {
-            throw "Installed '$taskName', but could not remove the legacy task '$legacyTaskName'. Remove the legacy task before it can run again. $($_.Exception.Message)"
+    foreach ($legacyTaskName in $legacyTaskNames) {
+        $legacyTask = Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
+        if ($null -ne $legacyTask) {
+            try {
+                Stop-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false
+            }
+            catch {
+                throw "Installed '$taskName', but could not remove the legacy task '$legacyTaskName'. Remove the legacy task before it can run again. $($_.Exception.Message)"
+            }
         }
     }
 
