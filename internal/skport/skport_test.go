@@ -101,7 +101,7 @@ func TestHTTPFlowHeadersAndClaimAtMostOnce(t *testing.T) {
 			request.Header.Get("Origin") != "https://game.skport.com" ||
 			request.Header.Get("Referer") != "https://game.skport.com/" ||
 			request.Header.Get("Platform") != platform ||
-			request.Header.Get("Vname") != clientVersion {
+			request.Header.Get("Vname") != skportVName {
 			t.Errorf("missing protocol headers: %v", request.Header)
 		}
 		for _, header := range []string{"Priority", "Sec-Ch-Ua", "Sec-Ch-Ua-Mobile", "Sec-Ch-Ua-Platform", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site"} {
@@ -118,7 +118,7 @@ func TestHTTPFlowHeadersAndClaimAtMostOnce(t *testing.T) {
 			_, _ = io.WriteString(writer, `{"code":0,"data":{"token":"token"}}`)
 		case request.Method == http.MethodGet:
 			status.Add(1)
-			wantSign := GenerateSign(AttendancePath, "", timestamp, "token", platform, clientVersion)
+			wantSign := GenerateSign(AttendancePath, "", timestamp, "token", platform, skportVName)
 			if request.Header.Get("Sign") != wantSign ||
 				request.Header.Get("Timestamp") != timestamp ||
 				request.Header.Get("Sk-Game-Role") != "role-secret" ||
@@ -132,7 +132,7 @@ func TestHTTPFlowHeadersAndClaimAtMostOnce(t *testing.T) {
 			if err != nil {
 				t.Errorf("read claim body: %v", err)
 			}
-			wantSign := GenerateSign(AttendancePath, "{}", timestamp, "token", platform, clientVersion)
+			wantSign := GenerateSign(AttendancePath, "{}", timestamp, "token", platform, skportVName)
 			if string(body) != "{}" ||
 				request.Header.Get("Sign") != wantSign ||
 				request.Header.Get("Timestamp") != timestamp ||
@@ -179,7 +179,7 @@ func TestClaimTransportAndMalformedResponsesAreAmbiguousAndNeverRetried(t *testi
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
 				writer.WriteHeader(test.status)
-				io.WriteString(writer, test.body)
+				_, _ = io.WriteString(writer, test.body)
 			}))
 			defer server.Close()
 			_, err := testClient(server.URL, server.Client()).ClaimOnce(context.Background(), "token")
@@ -199,7 +199,7 @@ func TestStatusRetriesTransientFailureAndRejectsLargeBodyAndRedirect(t *testing.
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/large":
-			io.WriteString(writer, strings.Repeat("x", maxBodyBytes+1))
+			_, _ = io.WriteString(writer, strings.Repeat("x", maxBodyBytes+1))
 		case "/redirect":
 			http.Redirect(writer, request, "/target", http.StatusFound)
 		default:
@@ -207,7 +207,7 @@ func TestStatusRetriesTransientFailureAndRejectsLargeBodyAndRedirect(t *testing.
 				writer.WriteHeader(500)
 				return
 			}
-			io.WriteString(writer, `{"code":0,"data":{"available":false}}`)
+			_, _ = io.WriteString(writer, `{"code":0,"data":{"available":false}}`)
 		}
 	}))
 	defer server.Close()
@@ -239,7 +239,7 @@ func TestRefreshMissingTokenAndHTTPAuth(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 				writer.WriteHeader(test.status)
-				io.WriteString(writer, test.body)
+				_, _ = io.WriteString(writer, test.body)
 			}))
 			defer server.Close()
 			_, err := testClient(server.URL, server.Client()).Refresh(context.Background())
@@ -253,7 +253,7 @@ func TestRefreshMissingTokenAndHTTPAuth(t *testing.T) {
 
 func TestRequestBudgetExhaustion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		io.WriteString(writer, `{"code":0,"data":{}}`)
+		_, _ = io.WriteString(writer, `{"code":0,"data":{}}`)
 	}))
 	defer server.Close()
 	client := testClient(server.URL, server.Client())
@@ -275,7 +275,7 @@ func TestClaimOnceRejectsSecondCallBeforeNetwork(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
-		io.WriteString(writer, `{"code":0,"data":{"awardIds":[]}}`)
+		_, _ = io.WriteString(writer, `{"code":0,"data":{"awardIds":[]}}`)
 	}))
 	defer server.Close()
 	client := testClient(server.URL, server.Client())
@@ -309,13 +309,13 @@ func TestStatusRetriesReserveOneRequestForClaim(t *testing.T) {
 				writer.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			io.WriteString(writer, `{"code":0,"data":{"token":"token"}}`)
+			_, _ = io.WriteString(writer, `{"code":0,"data":{"token":"token"}}`)
 		case request.Method == http.MethodGet:
 			statusCalls.Add(1)
 			writer.WriteHeader(http.StatusInternalServerError)
 		case request.Method == http.MethodPost:
 			claimCalls.Add(1)
-			io.WriteString(writer, `{"code":0,"data":{"awardIds":[]}}`)
+			_, _ = io.WriteString(writer, `{"code":0,"data":{"awardIds":[]}}`)
 		}
 	}))
 	defer server.Close()
@@ -347,7 +347,7 @@ func TestStatusRetriesRegenerateSignedHeaders(t *testing.T) {
 			writer.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		io.WriteString(writer, `{"code":0,"data":{"available":false}}`)
+		_, _ = io.WriteString(writer, `{"code":0,"data":{"available":false}}`)
 	}))
 	defer server.Close()
 	now := time.Unix(1700000000, 0)
@@ -376,10 +376,10 @@ func TestOrdinaryHTTP4xxNeverLooksSuccessful(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusBadRequest)
 		if request.Method == http.MethodGet {
-			io.WriteString(writer, `{"code":0,"data":{"token":"token"}}`)
+			_, _ = io.WriteString(writer, `{"code":0,"data":{"token":"token"}}`)
 			return
 		}
-		io.WriteString(writer, `{"code":0,"data":{"awardIds":[]}}`)
+		_, _ = io.WriteString(writer, `{"code":0,"data":{"awardIds":[]}}`)
 	}))
 	defer server.Close()
 	client := testClient(server.URL, server.Client())
@@ -399,7 +399,7 @@ func TestRefreshAPIErrorDoesNotExposeServerMessage(t *testing.T) {
 		if !strings.HasPrefix(request.Header.Get("User-Agent"), "akef-claim/") {
 			t.Errorf("missing versioned user agent: %q", request.Header.Get("User-Agent"))
 		}
-		io.WriteString(writer, `{"code":999,"message":"credential-secret","data":{}}`)
+		_, _ = io.WriteString(writer, `{"code":999,"message":"credential-secret","data":{}}`)
 	}))
 	defer server.Close()
 	client := testClient(server.URL, server.Client())
@@ -425,7 +425,7 @@ func TestStatusHonorsRetryAfterFor429(t *testing.T) {
 			writer.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
-		io.WriteString(writer, `{"code":0,"data":{"available":false}}`)
+		_, _ = io.WriteString(writer, `{"code":0,"data":{"available":false}}`)
 	}))
 	defer server.Close()
 	var slept time.Duration
@@ -485,7 +485,7 @@ func testClient(baseURL string, httpClient *http.Client) *Client {
 
 func readFixture(t *testing.T, name string, target any) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", name))
+	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", name)) // #nosec G304 -- fixture names are controlled by tests.
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
 	processlock "github.com/hypercube-xyz/akef-skport-claim/internal/lock"
+	"github.com/hypercube-xyz/akef-skport-claim/internal/report"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/skport"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/state"
@@ -28,6 +30,10 @@ type fakeClient struct {
 }
 
 type fakeNotifier struct{ calls int }
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 type deduplicatingNotifier struct {
 	mu           sync.Mutex
@@ -170,6 +176,23 @@ func TestExecuteContinuesAfterAccountFailure(t *testing.T) {
 	}
 }
 
+func TestExecuteReportsOutputFailure(t *testing.T) {
+	path := writeAppConfig(t, "0s")
+	isolateUserDirs(t)
+	client := &fakeClient{status: attendance(`{"available":false,"done":true}`)}
+	runReport, code, err := Execute(context.Background(), Options{
+		ConfigPath: path,
+		Output:     failingWriter{},
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ClientFactory: func(config.Account, time.Duration) SKPortClient {
+			return client
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "write report") || code != report.ExitInternal || len(runReport.Accounts) != 2 {
+		t.Fatalf("output failure: code=%d err=%v report=%#v", code, err, runReport)
+	}
+}
+
 func TestExecuteReportsInterruptedAccountDelay(t *testing.T) {
 	path := writeAppConfig(t, "1s")
 	isolateUserDirs(t)
@@ -252,7 +275,11 @@ func TestStatusDoesNotWaitForClaimLock(t *testing.T) {
 	isolateUserDirs(t)
 	path := writeAppConfig(t, "0s")
 	held := acquireRunLock(t)
-	defer held.Close()
+	defer func() {
+		if err := held.Close(); err != nil {
+			t.Errorf("release run lock: %v", err)
+		}
+	}()
 
 	client := &fakeClient{status: attendance(`{"available":false,"done":true}`)}
 	runReport, code, err := Execute(context.Background(), Options{
@@ -300,7 +327,11 @@ func TestRunLockTimeoutIsTransientFailure(t *testing.T) {
 	isolateUserDirs(t)
 	path := writeAppConfig(t, "0s")
 	held := acquireRunLock(t)
-	defer held.Close()
+	defer func() {
+		if err := held.Close(); err != nil {
+			t.Errorf("release run lock: %v", err)
+		}
+	}()
 
 	_, code, err := Execute(context.Background(), Options{
 		ConfigPath:    path,

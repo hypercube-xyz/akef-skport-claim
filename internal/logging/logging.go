@@ -37,7 +37,8 @@ func scheduledAt(cacheDir string, level slog.Level, now time.Time) (*slog.Logger
 	if err := rotate(path); err != nil {
 		return nil, nil, "", err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	// path is derived from the application-owned cache directory and local date.
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("open scheduled log: %w", err)
 	}
@@ -57,7 +58,7 @@ func removeExpired(dir string, now time.Time) ([]error, error) {
 	var cleanupErrors []error
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.HasPrefix(name, "scheduled-") || !(strings.HasSuffix(name, ".log") || strings.HasSuffix(name, ".log.1")) {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.HasPrefix(name, "scheduled-") || (!strings.HasSuffix(name, ".log") && !strings.HasSuffix(name, ".log.1")) {
 			continue
 		}
 		info, err := entry.Info()

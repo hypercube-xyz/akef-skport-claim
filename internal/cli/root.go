@@ -52,7 +52,7 @@ func Execute(ctx context.Context, args []string) int {
 			writeSilentError(err)
 			return errorCode(err)
 		}
-		fmt.Fprintln(options.errorOut, err)
+		_, _ = fmt.Fprintln(options.errorOut, err)
 		return errorCode(err)
 	}
 	return options.exitCode
@@ -120,7 +120,9 @@ func statusCommand(options *rootOptions) *cobra.Command {
 }
 
 func versionCommand() *cobra.Command {
-	return &cobra.Command{Use: "version", Args: noArgs, Run: func(command *cobra.Command, _ []string) { fmt.Fprintln(command.OutOrStdout(), version.String()) }}
+	return &cobra.Command{Use: "version", Args: noArgs, RunE: func(command *cobra.Command, _ []string) error {
+		return writeOutput(command.OutOrStdout(), "%s\n", version.String())
+	}}
 }
 
 type exitError struct {
@@ -164,6 +166,11 @@ func withExitCode(code int, err error) error {
 
 func noArgs(command *cobra.Command, args []string) error {
 	return withExitCode(report.ExitConfig, cobra.NoArgs(command, args))
+}
+
+func writeOutput(writer io.Writer, format string, args ...any) error {
+	_, err := fmt.Fprintf(writer, format, args...)
+	return withExitCode(report.ExitInternal, err)
 }
 
 func maximumNArgs(limit int) cobra.PositionalArgs {
@@ -218,7 +225,7 @@ func writeSilentError(err error) {
 	if logErr != nil {
 		return
 	}
-	defer closer.Close()
+	defer func() { _ = closer.Close() }()
 	logger.Error("silent command failed", "error", err)
 }
 

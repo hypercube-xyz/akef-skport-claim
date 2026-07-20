@@ -4,7 +4,7 @@ Destinations are independent. A failed target does not stop later targets and ne
 
 Notifications use the same base line format across destinations: `[account]: result`. Discord mentions are disabled. ntfy uses the neutral title `AKEF` and raises native priority for errors; each destination truncates only when required by its service limit.
 
-Discord requires an HTTPS webhook on an official Discord host with a path beginning `/api/webhooks/`. Telegram requires a bot token and chat ID. ntfy requires an HTTPS server and a conservative topic name.
+Discord requires an HTTPS webhook on an official Discord host with a path beginning `/api/webhooks/`. Telegram requires a bot token and chat ID. ntfy requires an HTTPS server and a conservative topic name. Every enabled target must select at least one unique event. Valid values are `claimed`, `already_claimed`, `unavailable`, `auth_expired`, and `error`.
 
 ```bash
 akef-claim notify test discord-home

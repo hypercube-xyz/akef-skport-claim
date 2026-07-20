@@ -25,7 +25,7 @@ const (
 	maxAttempts    = 3
 	requestLimit   = 5
 	platform       = "3"
-	clientVersion  = "1.0.0"
+	skportVName    = "1.0.0"
 )
 
 type ErrorKind string
@@ -214,7 +214,7 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 		}
 		return &Error{Kind: kind, Op: path, Err: classifyNetworkError(err), Retryable: !claim}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 		switch {
@@ -277,7 +277,7 @@ func commonHeaders(account config.Account) http.Header {
 		"Content-Type": []string{"application/json"},
 		"Cred":         []string{account.Credential.Expose()},
 		"Platform":     []string{platform},
-		"Vname":        []string{clientVersion},
+		"Vname":        []string{skportVName},
 		"Origin":       []string{"https://game.skport.com"},
 		"Referer":      []string{"https://game.skport.com/"},
 	}
@@ -289,7 +289,7 @@ func signedHeaders(account config.Account, token, path, body string, now time.Ti
 	headers.Set("sk-language", account.Language)
 	headers.Set("sk-game-role", account.GameRole.Expose())
 	headers.Set("timestamp", timestamp)
-	headers.Set("sign", GenerateSign(path, body, timestamp, token, platform, clientVersion))
+	headers.Set("sign", GenerateSign(path, body, timestamp, token, platform, skportVName))
 	return headers
 }
 
@@ -301,7 +301,7 @@ func classifyNetworkError(err error) error {
 }
 
 func parseRetryAfter(value string, now time.Time) time.Duration {
-	if seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && seconds >= 0 && seconds <= int64((1<<63-1)/int64(time.Second)) {
+	if seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && seconds >= 0 && seconds <= (1<<63-1)/int64(time.Second) {
 		return time.Duration(seconds) * time.Second
 	}
 	if date, err := http.ParseTime(value); err == nil && date.After(now) {

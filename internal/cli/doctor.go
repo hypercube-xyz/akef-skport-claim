@@ -20,13 +20,19 @@ func doctorCommand(options *rootOptions) *cobra.Command {
 		if err != nil {
 			return withExitCode(report.ExitConfig, err)
 		}
-		fmt.Fprintf(command.OutOrStdout(), "PASS config path: %s\n", path)
+		if err := writeOutput(command.OutOrStdout(), "PASS config path: %s\n", path); err != nil {
+			return err
+		}
 		cfg, err := config.Load(path)
 		if err != nil {
-			fmt.Fprintf(command.OutOrStdout(), "FAIL config: %v\n", err)
+			if writeErr := writeOutput(command.OutOrStdout(), "FAIL config: %v\n", err); writeErr != nil {
+				return writeErr
+			}
 			return &exitError{code: report.ExitConfig, err: err}
 		}
-		fmt.Fprintf(command.OutOrStdout(), "PASS config: %d enabled accounts\n", countEnabled(cfg))
+		if err := writeOutput(command.OutOrStdout(), "PASS config: %d enabled accounts\n", countEnabled(cfg)); err != nil {
+			return err
+		}
 
 		cacheDir, err := config.CacheDir()
 		if err != nil {
@@ -40,13 +46,16 @@ func doctorCommand(options *rootOptions) *cobra.Command {
 			return withExitCode(report.ExitInternal, err)
 		}
 		probeName := probe.Name()
+		defer func() { _ = os.Remove(probeName) }()
 		if err := probe.Close(); err != nil {
 			return withExitCode(report.ExitInternal, fmt.Errorf("cache write check failed: %w", err))
 		}
 		if err := os.Remove(probeName); err != nil {
 			return withExitCode(report.ExitInternal, fmt.Errorf("cache cleanup check failed: %w", err))
 		}
-		fmt.Fprintln(command.OutOrStdout(), "PASS cache directory is writable")
+		if err := writeOutput(command.OutOrStdout(), "PASS cache directory is writable\n"); err != nil {
+			return err
+		}
 
 		probeLock, acquired, err := lock.Try(command.Context(), filepath.Join(cacheDir, "doctor.lock"))
 		if err != nil {
@@ -58,13 +67,16 @@ func doctorCommand(options *rootOptions) *cobra.Command {
 		if err := probeLock.Close(); err != nil {
 			return withExitCode(report.ExitInternal, fmt.Errorf("process lock release failed: %w", err))
 		}
-		fmt.Fprintln(command.OutOrStdout(), "PASS process lock acquisition and release")
+		if err := writeOutput(command.OutOrStdout(), "PASS process lock acquisition and release\n"); err != nil {
+			return err
+		}
 
 		if !network {
-			fmt.Fprintln(command.OutOrStdout(), "PASS network activity skipped (use --network to check sessions)")
-			return nil
+			return writeOutput(command.OutOrStdout(), "PASS network activity skipped (use --network to check sessions)\n")
 		}
-		fmt.Fprintln(command.OutOrStdout(), "WARN network status checks requested; no claims will be sent")
+		if err := writeOutput(command.OutOrStdout(), "WARN network status checks requested; no claims will be sent\n"); err != nil {
+			return err
+		}
 		_, code, err := app.Execute(command.Context(), app.Options{ConfigPath: path, StatusOnly: true, Output: command.OutOrStdout()})
 		if err != nil {
 			return &exitError{code: code, err: err}
