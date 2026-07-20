@@ -26,7 +26,7 @@ func TestDiscordPayloadAndRetry(t *testing.T) {
 		if err := json.Unmarshal(body, &payload); err != nil {
 			t.Errorf("decode payload: %v", err)
 		}
-		if payload.Username != "Arknights: Endfield Daily Sign-in" ||
+		if payload.Username != "Arknights: Endfield SKPORT Daily Sign-in" ||
 			payload.Content != "[test]: synthetic notification test" ||
 			payload.AllowedMentions.Parse == nil {
 			t.Errorf("bad payload: %s", body)
@@ -88,7 +88,7 @@ func TestTelegramAndNtfyPayloads(t *testing.T) {
 			telegram.Store(payload.ChatID == "chat-1" && payload.Text == "[test]: synthetic notification test")
 		case request.URL.Path == "/topic-safe":
 			ntfy.Store(request.Header.Get("Authorization") == "Bearer ntfy-token" &&
-				request.Header.Get("Title") == "AKEF" &&
+				request.Header.Get("Title") == "Arknights: Endfield SKPORT" &&
 				request.Header.Get("Tags") == "" &&
 				request.Header.Get("Priority") == "default" &&
 				string(body) == "[test]: synthetic notification test")
@@ -121,7 +121,7 @@ func TestTelegramPayloadStaysPlain(t *testing.T) {
 
 func TestNtfyAttentionPresentationUsesHighPriority(t *testing.T) {
 	presentation := newNtfyPresentation(result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.AuthExpired, Summary: "login required"}}})
-	if presentation.Priority != "high" || presentation.Title != "AKEF" || presentation.Body != "[main]: Error login required" {
+	if presentation.Priority != "high" || presentation.Title != "Arknights: Endfield SKPORT" || presentation.Body != "[main]: Error login required" {
 		t.Fatalf("unexpected ntfy presentation: %#v", presentation)
 	}
 }

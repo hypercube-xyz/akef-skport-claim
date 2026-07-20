@@ -61,7 +61,7 @@ func Execute(ctx context.Context, args []string) int {
 func newRoot(options *rootOptions) *cobra.Command {
 	root := &cobra.Command{
 		Use:               "akef-claim",
-		Short:             "Local-only SKPORT Endfield daily attendance CLI",
+		Short:             "Local-only Arknights: Endfield SKPORT daily-attendance CLI",
 		SilenceErrors:     true,
 		SilenceUsage:      true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},

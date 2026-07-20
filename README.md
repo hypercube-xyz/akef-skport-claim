@@ -1,4 +1,4 @@
-# AKEF SKPort Claim
+# Arknights: Endfield SKPORT Claim
 
 [![CI](https://github.com/hypercube-xyz/akef-skport-claim/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hypercube-xyz/akef-skport-claim/actions/workflows/ci.yml)
 [![Go version](https://img.shields.io/github/go-mod/go-version/hypercube-xyz/akef-skport-claim)](https://go.dev/dl/)
@@ -154,7 +154,7 @@ Windows equivalents:
 
 A silent scheduled invocation has a 30-minute application deadline. Windows applies a 35-minute Task Scheduler execution limit and retries up to three times, 30 minutes apart, only when the application returns transient pre-claim exit code `30`. Linux and macOS do not add process retries. The claim POST itself is never retried automatically.
 
-Scheduled logs are written as daily files under the operating-system user cache directory. At every silent start, regular AKEF scheduled logs older than 45 days are deleted; a current daily file is also size-rotated after 5 MiB. Uninstall retains configuration, logs, and notification state unless `--purge` is supplied.
+Scheduled logs are written as daily files under the operating-system user cache directory. At every silent start, regular Arknights: Endfield SKPORT scheduled logs older than 45 days are deleted; a current daily file is also size-rotated after 5 MiB. Uninstall retains configuration, logs, and notification state unless `--purge` is supplied.
 
 GitHub Actions is used only for repository build and test CI on pushes and pull requests. Daily attendance runs belong on the user's local scheduler; the repository has no scheduled Actions workflow and stores no attendance credentials in GitHub. See [scheduler documentation](docs/scheduler.md).
 

@@ -31,7 +31,7 @@ Startup random delay is controlled by `[run].random_delay` and occurs before the
 ```powershell
 $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wscript.exe" -Argument $backgroundLauncher
 $trigger = New-ScheduledTaskTrigger -Daily -At 00:05
-Register-ScheduledTask -TaskName 'AKEF SKPort Daily Claim' -InputObject $task
+Register-ScheduledTask -TaskName 'Arknights: Endfield SKPORT Daily Claim' -InputObject $task
 ```
 
 The task uses the current user's interactive token with least privilege, `IgnoreNew`, missed-start handling, and a 35-minute execution limit. Its Windows Script Host launcher invokes the installed `akef-claim.exe --silent run --config ...` without creating a console window, including when the task is started manually. The launcher maps only exit code `30` to Task Scheduler failure, allowing at most three delayed retries. Definite or ambiguous claim outcomes are mapped to scheduler success so they cannot cause another claim attempt.
@@ -39,13 +39,13 @@ The task uses the current user's interactive token with least privilege, `Ignore
 Removal uses the same native module:
 
 ```powershell
-Unregister-ScheduledTask -TaskName 'AKEF SKPort Daily Claim' -Confirm:$false
+Unregister-ScheduledTask -TaskName 'Arknights: Endfield SKPORT Daily Claim' -Confirm:$false
 ```
 
 Query the task directly with:
 
 ```powershell
-Get-ScheduledTask -TaskName 'AKEF SKPort Daily Claim'
+Get-ScheduledTask -TaskName 'Arknights: Endfield SKPORT Daily Claim'
 ```
 
 ## Linux

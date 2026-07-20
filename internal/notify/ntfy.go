@@ -16,5 +16,5 @@ func newNtfyPresentation(runReport result.Run) ntfyPresentation {
 			priority = "high"
 		}
 	}
-	return ntfyPresentation{Title: "AKEF", Priority: priority, Body: truncateUTF8(formatNotification(runReport), 4000)}
+	return ntfyPresentation{Title: "Arknights: Endfield SKPORT", Priority: priority, Body: truncateUTF8(formatNotification(runReport), 4000)}
 }

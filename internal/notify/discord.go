@@ -14,7 +14,7 @@ type discordAllowedMentions struct {
 
 func newDiscordPayload(runReport result.Run) discordWebhookPayload {
 	return discordWebhookPayload{
-		Username:        "Arknights: Endfield Daily Sign-in",
+		Username:        "Arknights: Endfield SKPORT Daily Sign-in",
 		Content:         truncateUTF8(formatNotification(runReport), 2000),
 		AllowedMentions: discordAllowedMentions{Parse: []string{}},
 	}
