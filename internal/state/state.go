@@ -16,7 +16,8 @@ type Store struct {
 
 func Load(path string) (*Store, error) {
 	store := &Store{Notifications: map[string]time.Time{}}
-	data, err := os.ReadFile(path)
+	// path is an application-owned cache path assembled by the caller.
+	data, err := os.ReadFile(path) // #nosec G304
 	if errors.Is(err, os.ErrNotExist) {
 		return store, nil
 	}

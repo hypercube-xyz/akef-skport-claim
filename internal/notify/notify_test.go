@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -213,4 +214,50 @@ func (t *blockingTransport) RoundTrip(request *http.Request) (*http.Response, er
 	t.calls.Add(1)
 	<-request.Context().Done()
 	return nil, request.Context().Err()
+}
+
+func TestDefaultSenderOptionsAndSleepCancellation(t *testing.T) {
+	sender := New(Options{})
+	if sender.httpClient == nil || sender.telegramBaseURL != "https://api.telegram.org" || sender.now == nil || sender.sleep == nil {
+		t.Fatalf("incomplete defaults: %#v", sender)
+	}
+	if err := sender.sleep(context.Background(), time.Nanosecond); err != nil {
+		t.Fatalf("default sleep completion=%v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := sender.sleep(ctx, time.Hour); !errors.Is(err, context.Canceled) {
+		t.Fatalf("default sleep cancellation=%v", err)
+	}
+	if got := New(Options{TelegramBaseURL: "https://example.test///"}).telegramBaseURL; got != "https://example.test" {
+		t.Fatalf("trimmed Telegram base URL=%q", got)
+	}
+}
+
+func TestPerAccountNotificationsAndSelectionSkips(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sender := New(Options{HTTPClient: server.Client()})
+	target := config.NotificationTarget{Name: "target", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"claimed"}}
+	cfg := &config.Config{Notifications: config.Notifications{Aggregate: false, Targets: []config.NotificationTarget{
+		{Name: "disabled", Type: "discord", Webhook: config.NewSecret(server.URL), Events: []string{"claimed"}}, target,
+	}}}
+	run := result.Run{Accounts: []result.Account{{Name: "one", Outcome: result.Claimed}, {Name: "two", Outcome: result.Unavailable}}}
+	if errs := sender.SendAll(context.Background(), cfg, run, nil); len(errs) != 0 || calls.Load() != 1 {
+		t.Fatalf("errors=%v calls=%d", errs, calls.Load())
+	}
+	now := time.Unix(100, 0)
+	sender.now = func() time.Time { return now }
+	cfg.Run.NotificationErrorCooldown.Duration = time.Hour
+	cfg.Notifications.Aggregate = true
+	cfg.Notifications.Targets = []config.NotificationTarget{{Name: "errors", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"error"}}}
+	store := &state.Store{Notifications: map[string]time.Time{dedupKey("errors", "one", "error"): now}}
+	run.Accounts = []result.Account{{Name: "one", Outcome: result.InternalError}}
+	if errs := sender.SendAll(context.Background(), cfg, run, store); len(errs) != 0 || calls.Load() != 1 {
+		t.Fatalf("recent error was sent: errors=%v calls=%d", errs, calls.Load())
+	}
 }

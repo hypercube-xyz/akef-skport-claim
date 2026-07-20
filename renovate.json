@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabledManagers": ["gomod", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.golangci-lint-version$/"],
+      "matchStrings": ["(?<currentValue>v\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Dependabot owns Go module dependencies",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["require", "indirect", "replace", "tool", "golang"],
+      "enabled": false
+    },
+    {
+      "description": "Update Go directive patch releases",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "matchDepTypes": ["golang"],
+      "allowedVersions": "/^1\\.26\\.[0-9]+$/",
+      "rangeStrategy": "bump",
+      "commitMessagePrefix": "chore(go):",
+      "labels": ["dependencies", "go"]
+    },
+    {
+      "description": "Update golangci-lint releases",
+      "matchManagers": ["custom.regex"],
+      "commitMessagePrefix": "chore(lint):",
+      "labels": ["dependencies", "go"]
+    }
+  ]
+}

@@ -50,7 +50,7 @@ Get-ScheduledTask -TaskName 'AKEF SKPort Daily Claim'
 
 ## Linux
 
-When a systemd user manager is usable, `install.sh` writes `akef-skport-claim.service` and `akef-skport-claim.timer` under the user systemd directory, then enables the timer. Otherwise it manages only the tagged `# BEGIN/END akef-skport-claim` crontab block and preserves unrelated entries. Cron cannot guarantee missed-run catch-up.
+When a systemd user manager is usable, `install.sh` writes `akef-skport-claim.service` and `akef-skport-claim.timer` under the user systemd directory, then enables the timer. Otherwise it manages only the tagged `# BEGIN/END akef-skport-claim` crontab block and preserves unrelated entries. Cron cannot guarantee missed-run catch-up. If one marker is missing, either marker is duplicated, or the markers are out of order, installation and removal stop without replacing the crontab; repair the managed block manually and rerun the script.
 
 Inspect systemd state with:
 

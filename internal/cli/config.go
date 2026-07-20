@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/report"
 	"github.com/spf13/cobra"
@@ -16,8 +14,7 @@ func configCommand(options *rootOptions) *cobra.Command {
 		if err != nil {
 			return withExitCode(report.ExitConfig, err)
 		}
-		fmt.Fprintln(command.OutOrStdout(), path)
-		return nil
+		return writeOutput(command.OutOrStdout(), "%s\n", path)
 	}}
 	initCommand.Flags().BoolVar(&force, "force", false, "replace an existing config")
 
@@ -26,8 +23,7 @@ func configCommand(options *rootOptions) *cobra.Command {
 		if err != nil {
 			return withExitCode(report.ExitConfig, err)
 		}
-		fmt.Fprintf(command.OutOrStdout(), "valid: %s (%d enabled accounts)\n", cfg.Path, countEnabled(cfg))
-		return nil
+		return writeOutput(command.OutOrStdout(), "valid: %s (%d enabled accounts)\n", cfg.Path, countEnabled(cfg))
 	}}
 
 	pathCommand := &cobra.Command{Use: "path", Args: noArgs, RunE: func(command *cobra.Command, _ []string) error {
@@ -35,8 +31,7 @@ func configCommand(options *rootOptions) *cobra.Command {
 		if err != nil {
 			return withExitCode(report.ExitConfig, err)
 		}
-		fmt.Fprintln(command.OutOrStdout(), path)
-		return nil
+		return writeOutput(command.OutOrStdout(), "%s\n", path)
 	}}
 	parent.AddCommand(initCommand, validateCommand, pathCommand)
 	return parent

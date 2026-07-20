@@ -274,6 +274,10 @@ func isPlaceholder(value string) bool {
 }
 
 func ValidateTarget(target NotificationTarget) error {
+	if target.Enabled && len(target.Events) == 0 {
+		return errors.New("at least one event is required when enabled")
+	}
+	seenEvents := make(map[string]struct{}, len(target.Events))
 	validEvent := func(event string) bool {
 		return slices.Contains([]string{"claimed", "already_claimed", "unavailable", "auth_expired", "error"}, event)
 	}
@@ -281,6 +285,10 @@ func ValidateTarget(target NotificationTarget) error {
 		if !validEvent(event) {
 			return fmt.Errorf("invalid event %q", event)
 		}
+		if _, exists := seenEvents[event]; exists {
+			return fmt.Errorf("duplicate event %q", event)
+		}
+		seenEvents[event] = struct{}{}
 	}
 	switch target.Type {
 	case "discord":

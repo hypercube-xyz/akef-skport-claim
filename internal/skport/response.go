@@ -234,7 +234,7 @@ func collectAvailableIDs(value any, ids map[string]bool) {
 	case map[string]any:
 		available, availableKnown := directBool(typed, availableKeys)
 		done, doneKnown := directBool(typed, doneKeys)
-		if availableKnown && available && !(doneKnown && done) {
+		if availableKnown && available && (!doneKnown || !done) {
 			if id, ok := typed["awardId"].(string); ok {
 				ids[id] = true
 			}

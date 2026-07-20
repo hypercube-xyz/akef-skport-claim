@@ -38,7 +38,9 @@ func notifyCommand(options *rootOptions) *cobra.Command {
 				return withExitCode(report.ExitTransient, fmt.Errorf("notification target %q: %w", target.Name, err))
 			}
 			matched++
-			fmt.Fprintf(command.OutOrStdout(), "sent test notification to %s\n", target.Name)
+			if err := writeOutput(command.OutOrStdout(), "sent test notification to %s\n", target.Name); err != nil {
+				return err
+			}
 		}
 		if matched == 0 {
 			if name == "" {

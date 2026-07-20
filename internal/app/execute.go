@@ -72,7 +72,11 @@ func Execute(ctx context.Context, options Options) (result.Run, int, error) {
 		return result.Run{}, report.ExitInternal, err
 	}
 	if closer != nil {
-		defer closer.Close()
+		defer func() {
+			if err := closer.Close(); err != nil {
+				logger.Warn("failed to close scheduled log", "error", err)
+			}
+		}()
 	}
 	logger.Info("starting attendance operation", "silent", options.Silent, "status_only", options.StatusOnly)
 
@@ -132,7 +136,7 @@ func Execute(ctx context.Context, options Options) (result.Run, int, error) {
 		if i < len(accounts)-1 && cfg.Run.AccountDelay.Duration > 0 {
 			if err := sleep(ctx, cfg.Run.AccountDelay.Duration); err != nil {
 				runReport.Duration = time.Since(started)
-				writeReport(options, logger, runReport)
+				_ = writeReport(options, logger, runReport)
 				return runReport, report.ExitTransient, fmt.Errorf("wait between accounts: %w", err)
 			}
 		}
@@ -147,7 +151,9 @@ func Execute(ctx context.Context, options Options) (result.Run, int, error) {
 	if !options.StatusOnly {
 		sendNotifications(ctx, logger, cacheDir, cfg, runReport, options.Notifier)
 	}
-	writeReport(options, logger, runReport)
+	if err := writeReport(options, logger, runReport); err != nil {
+		return runReport, report.ExitInternal, err
+	}
 	return runReport, report.ExitCode(runReport), nil
 }
 
@@ -155,7 +161,8 @@ func randomDelay(maximum time.Duration) time.Duration {
 	if maximum <= 0 {
 		return 0
 	}
-	return time.Duration(rand.Int64N(int64(maximum)))
+	// This jitter is not a secret or security boundary; math/rand is appropriate.
+	return time.Duration(rand.Int64N(int64(maximum))) // #nosec G404
 }
 
 func configureLogger(options Options, cfg *config.Config, cacheDir string) (*slog.Logger, io.Closer, error) {
@@ -170,17 +177,20 @@ func configureLogger(options Options, cfg *config.Config, cacheDir string) (*slo
 	return logging.Interactive(level), nil, nil
 }
 
-func writeReport(options Options, logger *slog.Logger, runReport result.Run) {
+func writeReport(options Options, logger *slog.Logger, runReport result.Run) error {
 	text := report.Format(runReport)
 	if options.Silent {
 		logger.Info("aggregate report", "report", text)
-		return
+		return nil
 	}
 	output := options.Output
 	if output == nil {
 		output = os.Stdout
 	}
-	fmt.Fprintln(output, text)
+	if _, err := fmt.Fprintln(output, text); err != nil {
+		return fmt.Errorf("write report: %w", err)
+	}
+	return nil
 }
 
 func sleepContext(ctx context.Context, delay time.Duration) error {

@@ -31,12 +31,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           check-latest: false
@@ -85,7 +85,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          bash -n scripts/*.sh
+          bash -n scripts/*.sh scripts/*.bash
+          bash scripts/test-cron-blocks.bash
           ./scripts/install.sh --help >/dev/null
           ./scripts/uninstall.sh --help >/dev/null
           ./scripts/check-repository.sh
@@ -96,11 +97,24 @@ jobs:
 
           go vet ./...
 
+      - name: Scan Go vulnerabilities
+        run: |
+          set -euo pipefail
+
+          go version
+          go tool govulncheck ./...
+
       - name: Test with race detector
         run: |
           set -euo pipefail
 
           go test -race -count=1 ./...
+
+      - name: Enforce test coverage
+        run: |
+          set -euo pipefail
+
+          make coverage
 
       - name: Build CLI
         run: |
@@ -131,6 +145,30 @@ jobs:
             exit 1
           fi
 
+  lint:
+    name: Golangci-lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
+        with:
+          version-file: .golangci-lint-version
+
   platform-test:
     name: Test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -158,12 +196,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           check-latest: false

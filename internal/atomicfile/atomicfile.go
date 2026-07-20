@@ -19,7 +19,7 @@ func Write(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temporary file: %w", err)
@@ -43,7 +43,7 @@ func WriteNew(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temporary file: %w", err)
@@ -62,8 +62,8 @@ func writeTemp(dir string, data []byte, perm os.FileMode) (*os.File, error) {
 	ok := false
 	defer func() {
 		if !ok {
-			tmp.Close()
-			os.Remove(tmp.Name())
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
 		}
 	}()
 

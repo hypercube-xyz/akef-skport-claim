@@ -18,8 +18,13 @@ git clone https://github.com/hypercube-xyz/akef-skport-claim.git
 cd akef-skport-claim
 
 go mod download
+golangci-lint run
+make vuln
+make coverage
 make check
 ```
+
+Use the golangci-lint release recorded in `.golangci-lint-version`; the project configuration is `.golangci.yml`.
 
 ## Project layout
 
