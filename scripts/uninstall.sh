@@ -57,21 +57,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
+strip_managed_cron_block() {
+  awk -v begin="$cron_begin" -v end="$cron_end" '
+    $0 == begin {
+      if (inside) malformed=1
+      blocks++
+      if (blocks > 1) malformed=1
+      inside=1
+      next
+    }
+    $0 == end {
+      if (!inside) malformed=1
+      inside=0
+      next
+    }
+    !inside { print }
+    END {
+      if (inside) malformed=1
+      if (malformed) {
+        print "Refusing to modify a malformed akef-skport-claim crontab block." > "/dev/stderr"
+        exit 2
+      }
+    }
+  '
+}
+
 remove_cron_block() {
   command -v crontab >/dev/null 2>&1 || return 0
 
   local current temporary
   current="$(crontab -l 2>/dev/null || true)"
-  [[ "$current" == *"$cron_begin"* ]] || return 0
+  if [[ "$current" != *"$cron_begin"* && "$current" != *"$cron_end"* ]]; then
+    return 0
+  fi
 
   temporary="$(mktemp)"
   cleanup_paths+=("$temporary")
 
-  printf '%s\n' "$current" | awk -v begin="$cron_begin" -v end="$cron_end" '
-    $0 == begin { skip=1; next }
-    $0 == end { skip=0; next }
-    !skip { print }
-  ' >"$temporary"
+  printf '%s\n' "$current" | strip_managed_cron_block >"$temporary"
 
   crontab "$temporary"
   printf 'Removed managed crontab entry.\n'

@@ -108,6 +108,31 @@ shell_quote() {
   printf "'%s'" "$value"
 }
 
+strip_managed_cron_block() {
+  awk -v begin="$cron_begin" -v end="$cron_end" '
+    $0 == begin {
+      if (inside) malformed=1
+      blocks++
+      if (blocks > 1) malformed=1
+      inside=1
+      next
+    }
+    $0 == end {
+      if (!inside) malformed=1
+      inside=0
+      next
+    }
+    !inside { print }
+    END {
+      if (inside) malformed=1
+      if (malformed) {
+        print "Refusing to modify a malformed akef-skport-claim crontab block." > "/dev/stderr"
+        exit 2
+      }
+    }
+  '
+}
+
 install_systemd_scheduler() {
   local user_dir service_path timer_path binary_arg config_arg
 
@@ -160,11 +185,7 @@ install_cron_scheduler() {
 
   local current cleaned command_line temporary
   current="$(crontab -l 2>/dev/null || true)"
-  cleaned="$(printf '%s\n' "$current" | awk -v begin="$cron_begin" -v end="$cron_end" '
-    $0 == begin { skip=1; next }
-    $0 == end { skip=0; next }
-    !skip { print }
-  ')"
+  cleaned="$(printf '%s\n' "$current" | strip_managed_cron_block)"
 
   command_line="${schedule_minute_number} ${schedule_hour_number} * * * $(shell_quote "$installed_binary") --silent run --config $(shell_quote "$config_path") >/dev/null 2>&1"
   temporary="$(mktemp)"
