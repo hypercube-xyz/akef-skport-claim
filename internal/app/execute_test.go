@@ -51,6 +51,7 @@ func TestExecutionRejectsUnusableCacheAndScheduledLogPaths(t *testing.T) {
 	}
 	t.Setenv("XDG_CACHE_HOME", blocker)
 	t.Setenv("LOCALAPPDATA", blocker)
+	t.Setenv("HOME", blocker)
 	if _, code, err := Execute(context.Background(), Options{ConfigPath: path}); err == nil || code != report.ExitInternal {
 		t.Fatalf("unusable cache code=%d err=%v", code, err)
 	}
