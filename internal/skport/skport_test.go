@@ -227,6 +227,50 @@ func TestStatusRetriesTransientFailureAndRejectsLargeBodyAndRedirect(t *testing.
 	}
 }
 
+func TestRefreshRetryDoesNotReusePartiallyDecodedToken(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			// json.Unmarshal stores data before discovering the invalid code type.
+			_, _ = io.WriteString(writer, `{"data":{"token":"stale-token"},"code":"invalid"}`)
+			return
+		}
+		_, _ = io.WriteString(writer, `{"code":0}`)
+	}))
+	defer server.Close()
+
+	_, err := testClient(server.URL, server.Client()).Refresh(context.Background())
+	var typed *Error
+	if !errors.As(err, &typed) || typed.Kind != ErrorAuth || calls.Load() != 2 {
+		t.Fatalf("stale token was reused or refresh did not retry safely: calls=%d err=%v", calls.Load(), err)
+	}
+}
+
+func TestStatusRetryDoesNotReusePartiallyDecodedResponse(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet {
+			t.Errorf("unexpected claim request: %s %s", request.Method, request.URL.Path)
+		}
+		if calls.Add(1) == 1 {
+			// json.Unmarshal stores data before discovering the invalid code type.
+			_, _ = io.WriteString(writer, `{"data":{"available":true},"code":"invalid"}`)
+			return
+		}
+		_, _ = io.WriteString(writer, `{"code":0}`)
+	}))
+	defer server.Close()
+
+	response, err := testClient(server.URL, server.Client()).Status(context.Background(), "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := response.State()
+	if calls.Load() != 2 || len(response.Data) != 0 || state.Available || state.AvailableKnown {
+		t.Fatalf("stale status data was reused: calls=%d response=%+v state=%+v", calls.Load(), response, state)
+	}
+}
+
 func TestRefreshMissingTokenAndHTTPAuth(t *testing.T) {
 	for _, test := range []struct {
 		name   string
