@@ -146,7 +146,7 @@ install_systemd_scheduler() {
 
   cat >"$service_path" <<UNIT
 [Unit]
-Description=AKEF SKPORT daily attendance claim
+Description=Arknights: Endfield SKPORT daily attendance claim
 After=network-online.target
 Wants=network-online.target
 
@@ -161,7 +161,7 @@ UNIT
 
   cat >"$timer_path" <<TIMER
 [Unit]
-Description=Run AKEF SKPORT daily attendance claim
+Description=Run Arknights: Endfield SKPORT daily attendance claim
 
 [Timer]
 OnCalendar=*-*-* ${schedule_time}:00

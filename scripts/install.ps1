@@ -7,7 +7,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$taskName = 'AKEF SKPort Daily Claim'
+$taskName = 'Arknights: Endfield SKPORT Daily Claim'
+$legacyTaskName = 'AKEF SKPort Daily Claim'
 $appDirectory = 'akef-skport-claim'
 
 function Invoke-AkefClaim {
@@ -105,7 +106,7 @@ function Install-ScheduledClaim {
         -Trigger $trigger `
         -Settings $settings `
         -Principal $principal `
-        -Description 'Run the local AKEF SKPORT attendance claim once per day.'
+        -Description 'Run the local Arknights: Endfield SKPORT attendance claim once per day.'
 
     $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     $existingXml = $null
@@ -127,6 +128,17 @@ function Install-ScheduledClaim {
             }
         }
         throw "Failed to install the scheduled task: $($installError.Exception.Message)"
+    }
+
+    $legacyTask = Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
+    if ($null -ne $legacyTask) {
+        try {
+            Stop-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false
+        }
+        catch {
+            throw "Installed '$taskName', but could not remove the legacy task '$legacyTaskName'. Remove the legacy task before it can run again. $($_.Exception.Message)"
+        }
     }
 
     Get-ScheduledTask -TaskName $taskName |

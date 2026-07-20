@@ -7,7 +7,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$taskName = 'AKEF SKPort Daily Claim'
+$taskName = 'Arknights: Endfield SKPORT Daily Claim'
+$legacyTaskName = 'AKEF SKPort Daily Claim'
 $appDirectory = 'akef-skport-claim'
 
 if ($Help) {
@@ -20,19 +21,21 @@ try {
         throw 'LOCALAPPDATA is not defined'
     }
 
-    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($null -ne $existingTask) {
-        try {
-            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    foreach ($scheduledTaskName in $taskName, $legacyTaskName) {
+        $existingTask = Get-ScheduledTask -TaskName $scheduledTaskName -ErrorAction SilentlyContinue
+        if ($null -ne $existingTask) {
+            try {
+                Stop-ScheduledTask -TaskName $scheduledTaskName -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName $scheduledTaskName -Confirm:$false
+            }
+            catch {
+                throw "The scheduled task cannot be removed by the current user. Remove '$scheduledTaskName' from an elevated Task Scheduler or PowerShell session. $($_.Exception.Message)"
+            }
+            Write-Output "Removed Task Scheduler task: $scheduledTaskName"
         }
-        catch {
-            throw "The scheduled task cannot be removed by the current user. Remove '$taskName' from an elevated Task Scheduler or PowerShell session. $($_.Exception.Message)"
+        else {
+            Write-Output "Task Scheduler task already absent: $scheduledTaskName"
         }
-        Write-Output "Removed Task Scheduler task: $taskName"
-    }
-    else {
-        Write-Output "Task Scheduler task already absent: $taskName"
     }
 
     $installDirectory = Join-Path $env:LOCALAPPDATA "Programs\$appDirectory\bin"

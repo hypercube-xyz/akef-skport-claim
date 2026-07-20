@@ -75,9 +75,9 @@ func Format(run result.Run) string {
 	}
 	var builder strings.Builder
 	if hasErrors {
-		builder.WriteString("AKEF daily run completed with errors\n\n")
+		builder.WriteString("Arknights: Endfield SKPORT daily claim completed with errors\n\n")
 	} else {
-		builder.WriteString("AKEF daily run completed\n\n")
+		builder.WriteString("Arknights: Endfield SKPORT daily claim completed\n\n")
 	}
 	for _, account := range run.Accounts {
 		summary := account.Summary
