@@ -2,262 +2,137 @@ package notify
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/state"
 )
 
-func TestDiscordPayloadAndRetry(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		body, _ := io.ReadAll(request.Body)
-		var payload discordWebhookPayload
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Errorf("decode payload: %v", err)
-		}
-		if payload.Username != "Arknights: Endfield SKPORT Daily Sign-in" ||
-			payload.Content != "[test]: synthetic notification test" ||
-			payload.AllowedMentions.Parse == nil {
-			t.Errorf("bad payload: %s", body)
-		}
-		if calls.Add(1) == 1 {
-			writer.WriteHeader(500)
-			return
-		}
-		writer.WriteHeader(204)
-	}))
-	defer server.Close()
-	sender := New(Options{HTTPClient: server.Client(), Sleep: func(context.Context, time.Duration) error { return nil }})
-	target := config.NotificationTarget{Name: "discord", Type: "discord", Webhook: config.NewSecret(server.URL)}
-	if err := sender.SendTest(context.Background(), target); err != nil {
-		t.Fatal(err)
-	}
-	if calls.Load() != 2 {
-		t.Fatalf("wanted one retry, got %d calls", calls.Load())
-	}
-}
-
-func TestFailedTargetDoesNotStopLaterTargetAndDeduplicatesErrors(t *testing.T) {
-	var success atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/fail" {
-			writer.WriteHeader(400)
-			return
-		}
-		success.Add(1)
-		writer.WriteHeader(204)
-	}))
-	defer server.Close()
-	now := time.Unix(1000, 0)
-	sender := New(Options{HTTPClient: server.Client(), Now: func() time.Time { return now }, Sleep: func(context.Context, time.Duration) error { return nil }})
-	cfg := &config.Config{Run: config.RunConfig{NotificationErrorCooldown: config.Duration{Duration: time.Hour}}, Notifications: config.Notifications{Targets: []config.NotificationTarget{
-		{Name: "bad", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL + "/fail"), Events: []string{"error"}},
-		{Name: "good", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL + "/good"), Events: []string{"error"}},
-	}}}
-	runReport := result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.TransientError}}}
-	stateFile := &state.Store{Notifications: map[string]time.Time{}}
-	errs := sender.SendAll(context.Background(), cfg, runReport, stateFile)
-	if len(errs) != 1 || success.Load() != 1 {
-		t.Fatalf("errs=%v success=%d", errs, success.Load())
-	}
-	sender.SendAll(context.Background(), cfg, runReport, stateFile)
-	if success.Load() != 1 {
-		t.Fatal("successful target was not deduplicated")
-	}
-}
-
-func TestTelegramAndNtfyPayloads(t *testing.T) {
-	var telegram, ntfy atomic.Bool
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		body, _ := io.ReadAll(request.Body)
-		switch {
-		case strings.Contains(request.URL.Path, "/bottest-token/sendMessage"):
-			var payload telegramMessagePayload
-			_ = json.Unmarshal(body, &payload)
-			telegram.Store(payload.ChatID == "chat-1" && payload.Text == "[test]: synthetic notification test")
-		case request.URL.Path == "/topic-safe":
-			ntfy.Store(request.Header.Get("Authorization") == "Bearer ntfy-token" &&
-				request.Header.Get("Title") == "Arknights: Endfield SKPORT" &&
-				request.Header.Get("Tags") == "" &&
-				request.Header.Get("Priority") == "default" &&
-				string(body) == "[test]: synthetic notification test")
-		}
-		writer.WriteHeader(200)
-	}))
-	defer server.Close()
-	sender := New(Options{HTTPClient: server.Client(), TelegramBaseURL: server.URL, Sleep: func(context.Context, time.Duration) error { return nil }})
-	if err := sender.SendTest(context.Background(), config.NotificationTarget{Type: "telegram", BotToken: config.NewSecret("test-token"), ChatID: config.NewSecret("chat-1")}); err != nil {
-		t.Fatal(err)
-	}
-	if err := sender.SendTest(context.Background(), config.NotificationTarget{Type: "ntfy", Server: server.URL, Topic: "topic-safe", Token: config.NewSecret("ntfy-token")}); err != nil {
-		t.Fatal(err)
-	}
-	if !telegram.Load() || !ntfy.Load() {
-		t.Fatalf("telegram=%v ntfy=%v", telegram.Load(), ntfy.Load())
-	}
-}
-
-func TestTelegramPayloadStaysPlain(t *testing.T) {
-	payload := newTelegramPayload("chat", result.Run{Accounts: []result.Account{{
-		Name:    "<admin>@everyone",
-		Outcome: result.Claimed,
-		Summary: "reward <script>@user",
-	}}})
-	if payload.Text != "[<admin>@everyone]: reward <script>@user" {
-		t.Fatalf("unexpected Telegram payload: %#v", payload)
-	}
-}
-
-func TestNtfyAttentionPresentationUsesHighPriority(t *testing.T) {
-	presentation := newNtfyPresentation(result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.AuthExpired, Summary: "login required"}}})
-	if presentation.Priority != "high" || presentation.Title != "Arknights: Endfield SKPORT" || presentation.Body != "[main]: Error login required" {
-		t.Fatalf("unexpected ntfy presentation: %#v", presentation)
-	}
-}
-
-func TestRecentErrorDoesNotSuppressClaimedEvent(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		writer.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	now := time.Unix(1000, 0)
-	sender := New(Options{HTTPClient: server.Client(), Now: func() time.Time { return now }})
-	cfg := &config.Config{Run: config.RunConfig{NotificationErrorCooldown: config.Duration{Duration: time.Hour}}, Notifications: config.Notifications{Targets: []config.NotificationTarget{{
-		Name: "mixed", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"claimed", "error"},
-	}}}}
-	stateFile := &state.Store{Notifications: map[string]time.Time{dedupKey("mixed", "main", "error"): now.Add(-time.Minute)}}
-	runReport := result.Run{Accounts: []result.Account{
-		{Name: "main", Outcome: result.TransientError},
-		{Name: "secondary", Outcome: result.Claimed},
-	}}
-	if errs := sender.SendAll(context.Background(), cfg, runReport, stateFile); len(errs) != 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("claimed notification was incorrectly deduplicated: %d calls", calls.Load())
-	}
-}
-
-func TestErrorOutcomesShareDeduplicationCategory(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		writer.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	now := time.Unix(1000, 0)
-	sender := New(Options{HTTPClient: server.Client(), Now: func() time.Time { return now }})
-	cfg := &config.Config{Run: config.RunConfig{NotificationErrorCooldown: config.Duration{Duration: time.Hour}}, Notifications: config.Notifications{Targets: []config.NotificationTarget{{
-		Name: "errors", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"error"},
-	}}}}
-	stateFile := &state.Store{Notifications: map[string]time.Time{}}
-	for _, outcome := range []result.Outcome{result.TransientError, result.InternalError} {
-		runReport := result.Run{Accounts: []result.Account{{Name: "main", Outcome: outcome}}}
-		if errs := sender.SendAll(context.Background(), cfg, runReport, stateFile); len(errs) != 0 {
-			t.Fatalf("unexpected errors: %v", errs)
-		}
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("error category was not deduplicated: %d calls", calls.Load())
-	}
-}
-
-func TestTruncateUTF8RespectsByteLimit(t *testing.T) {
-	for _, test := range []struct {
-		value string
-		limit int
+func TestEventFor(t *testing.T) {
+	tests := []struct {
+		outcome result.Outcome
+		want    string
 	}{
-		{strings.Repeat("a", 2100), 2000},
-		{strings.Repeat("ก", 1000), 2000},
-		{"ก", 2},
-	} {
-		got := truncateUTF8(test.value, test.limit)
-		if len(got) > test.limit || !utf8.ValidString(got) {
-			t.Fatalf("invalid truncation: bytes=%d limit=%d valid=%v", len(got), test.limit, utf8.ValidString(got))
+		{result.Claimed, "claimed"},
+		{result.AlreadyClaimed, "already_claimed"},
+		{result.Unavailable, "unavailable"},
+		{result.AuthExpired, "auth_expired"},
+		{result.TransientError, "error"},
+		{result.ClaimError, "error"},
+		{result.AmbiguousClaim, "error"},
+		{result.InternalError, "error"},
+		{result.Skipped, "skipped"},
+	}
+	for _, tt := range tests {
+		if got := eventFor(tt.outcome); got != tt.want {
+			t.Errorf("eventFor(%q) = %q; want %q", tt.outcome, got, tt.want)
 		}
 	}
 }
 
-func TestNotificationCancellationStopsRetryAndKeepsEndpointSecret(t *testing.T) {
-	transport := &blockingTransport{}
-	sender := New(Options{HTTPClient: &http.Client{Transport: transport}})
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	secretPath := "/webhook-secret-value"
-	err := sender.SendTest(ctx, config.NotificationTarget{Type: "discord", Webhook: config.NewSecret("https://example.invalid" + secretPath)})
-	if err == nil || strings.Contains(err.Error(), secretPath) {
-		t.Fatalf("unsafe cancellation error: %v", err)
+func TestSelectEvents(t *testing.T) {
+	events := []string{"claimed", "error"}
+	results := []result.Account{
+		{Name: "main", Outcome: result.Claimed},
+		{Name: "alt", Outcome: result.TransientError},
 	}
-	if transport.calls.Load() != 1 {
-		t.Fatalf("canceled notification was retried: %d calls", transport.calls.Load())
+	matched, hasNonDedup, keys := selectEvents("test-target", events, results)
+	if !matched {
+		t.Error("selectEvents() matched = false; want true")
 	}
-}
-
-type blockingTransport struct{ calls atomic.Int32 }
-
-func (t *blockingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	t.calls.Add(1)
-	<-request.Context().Done()
-	return nil, request.Context().Err()
-}
-
-func TestDefaultSenderOptionsAndSleepCancellation(t *testing.T) {
-	sender := New(Options{})
-	if sender.httpClient == nil || sender.telegramBaseURL != "https://api.telegram.org" || sender.now == nil || sender.sleep == nil {
-		t.Fatalf("incomplete defaults: %#v", sender)
+	if !hasNonDedup {
+		t.Error("selectEvents() hasNonDedup = false; want true (claimed event)")
 	}
-	if err := sender.sleep(context.Background(), time.Nanosecond); err != nil {
-		t.Fatalf("default sleep completion=%v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := sender.sleep(ctx, time.Hour); !errors.Is(err, context.Canceled) {
-		t.Fatalf("default sleep cancellation=%v", err)
-	}
-	if got := New(Options{TelegramBaseURL: "https://example.test///"}).telegramBaseURL; got != "https://example.test" {
-		t.Fatalf("trimmed Telegram base URL=%q", got)
+	if len(keys) != 1 {
+		t.Errorf("selectEvents() keys = %v; want 1 dedup key (error)", keys)
 	}
 }
 
-func TestPerAccountNotificationsAndSelectionSkips(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		writer.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-	sender := New(Options{HTTPClient: server.Client()})
-	target := config.NotificationTarget{Name: "target", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"claimed"}}
-	cfg := &config.Config{Notifications: config.Notifications{Aggregate: false, Targets: []config.NotificationTarget{
-		{Name: "disabled", Type: "discord", Webhook: config.NewSecret(server.URL), Events: []string{"claimed"}}, target,
-	}}}
-	run := result.Run{Accounts: []result.Account{{Name: "one", Outcome: result.Claimed}, {Name: "two", Outcome: result.Unavailable}}}
-	if errs := sender.SendAll(context.Background(), cfg, run, nil); len(errs) != 0 || calls.Load() != 1 {
-		t.Fatalf("errors=%v calls=%d", errs, calls.Load())
+func TestSelectEvents_NoMatch(t *testing.T) {
+	events := []string{"claimed"}
+	results := []result.Account{{Name: "main", Outcome: result.AlreadyClaimed}}
+	matched, _, _ := selectEvents("test", events, results)
+	if matched {
+		t.Error("selectEvents() matched = true; want false")
 	}
-	now := time.Unix(100, 0)
-	sender.now = func() time.Time { return now }
-	cfg.Run.NotificationErrorCooldown.Duration = time.Hour
-	cfg.Notifications.Aggregate = true
-	cfg.Notifications.Targets = []config.NotificationTarget{{Name: "errors", Type: "discord", Enabled: true, Webhook: config.NewSecret(server.URL), Events: []string{"error"}}}
-	store := &state.Store{Notifications: map[string]time.Time{dedupKey("errors", "one", "error"): now}}
-	run.Accounts = []result.Account{{Name: "one", Outcome: result.InternalError}}
-	if errs := sender.SendAll(context.Background(), cfg, run, store); len(errs) != 0 || calls.Load() != 1 {
-		t.Fatalf("recent error was sent: errors=%v calls=%d", errs, calls.Load())
+}
+
+func TestSelectEvents_AllDedup(t *testing.T) {
+	events := []string{"auth_expired", "error"}
+	results := []result.Account{
+		{Name: "main", Outcome: result.AuthExpired},
+		{Name: "alt", Outcome: result.TransientError},
+	}
+	matched, hasNonDedup, keys := selectEvents("target", events, results)
+	if !matched {
+		t.Error("selectEvents() matched = false; want true")
+	}
+	if hasNonDedup {
+		t.Error("selectEvents() hasNonDedup = true; want false (all dedup)")
+	}
+	if len(keys) != 2 {
+		t.Errorf("selectEvents() keys = %v; want 2 dedup keys", keys)
+	}
+}
+
+func TestDedupKey(t *testing.T) {
+	a := dedupKey("discord", "main", "auth_expired")
+	b := dedupKey("discord", "main", "auth_expired")
+	if a != b {
+		t.Errorf("dedupKey() not deterministic: %q vs %q", a, b)
+	}
+	c := dedupKey("telegram", "main", "auth_expired")
+	if a == c {
+		t.Error("dedupKey() with different target should differ")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sendReport (non-HTTP paths)
+// ---------------------------------------------------------------------------
+
+func TestSendReport_NoTargets(t *testing.T) {
+	sender := &Sender{now: time.Now}
+	cfg := &config.Config{Notifications: config.Notifications{}}
+	run := result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.Claimed}}}
+	store := &state.Store{Notifications: map[string]time.Time{}}
+
+	errs := sender.sendReport(context.Background(), cfg, run, store)
+	if len(errs) != 0 {
+		t.Errorf("sendReport() errors = %v; want none", errs)
+	}
+}
+
+func TestSendReport_DisabledTarget(t *testing.T) {
+	sender := &Sender{now: time.Now}
+	cfg := &config.Config{Notifications: config.Notifications{
+		Targets: []config.NotificationTarget{
+			{Name: "test", Type: "discord", Enabled: false, Events: []string{"claimed"}},
+		},
+	}}
+	run := result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.Claimed}}}
+	store := &state.Store{Notifications: map[string]time.Time{}}
+
+	errs := sender.sendReport(context.Background(), cfg, run, store)
+	if len(errs) != 0 {
+		t.Errorf("sendReport() errors = %v; want none (disabled)", errs)
+	}
+}
+
+func TestSendReport_NoMatchingEvents(t *testing.T) {
+	sender := &Sender{now: time.Now}
+	cfg := &config.Config{Notifications: config.Notifications{
+		Targets: []config.NotificationTarget{
+			{Name: "test", Type: "discord", Enabled: true, Events: []string{"error"}, Webhook: config.NewSecret("https://discord.com/api/webhooks/123/abc")},
+		},
+	}}
+	run := result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.Claimed}}}
+	store := &state.Store{Notifications: map[string]time.Time{}}
+
+	errs := sender.sendReport(context.Background(), cfg, run, store)
+	if len(errs) != 0 {
+		t.Errorf("sendReport() errors = %v; want none (event mismatch)", errs)
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/hypercube-xyz/akef-skport-claim/internal/skport"
 )
 
-func executeAccount(ctx context.Context, client SKPortClient, account config.Account, statusOnly bool) result.Account {
+func executeAccount(ctx context.Context, client skport.Client, account config.Account, statusOnly bool) result.Account {
 	accountResult := result.Account{Name: account.Name}
 	token, err := client.Refresh(ctx)
 	if err != nil {

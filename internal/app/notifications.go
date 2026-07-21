@@ -15,6 +15,10 @@ import (
 
 const notificationLockWait = 10 * time.Minute
 
+type Notifier interface {
+	SendAll(context.Context, *config.Config, result.Run, *state.Store) []error
+}
+
 func sendNotifications(ctx context.Context, logger *slog.Logger, cacheDir string, cfg *config.Config, run result.Run, sender Notifier) {
 	// Deduplication is a read-modify-write transaction. A separate lock keeps
 	// notification latency from blocking attendance checks and claims.

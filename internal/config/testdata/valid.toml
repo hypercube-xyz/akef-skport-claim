@@ -1,0 +1,28 @@
+version = 1
+
+[app]
+language = "en"
+log_level = "info"
+
+[run]
+random_delay = "15m"
+account_delay = "3s"
+request_timeout = "20s"
+notification_error_cooldown = "24h"
+
+[[accounts]]
+name = "main"
+enabled = true
+cred = "my-credential-value"
+game_role = "my-game-role-value"
+language = "en"
+
+[[accounts]]
+name = "alt"
+enabled = false
+cred = "alt-cred"
+game_role = "alt-role"
+language = "en"
+
+[notifications]
+aggregate = true

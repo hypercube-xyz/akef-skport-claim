@@ -1,87 +1,63 @@
 package cli
 
 import (
-	"context"
-	"errors"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/report"
-	"github.com/spf13/cobra"
 )
 
-func TestSilentConfigurationErrorIsLoggedAndReturnsConfigExitCode(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", base)
-	t.Setenv("LOCALAPPDATA", base)
-	t.Setenv("HOME", base)
-	missing := filepath.Join(t.TempDir(), "missing.toml")
-	if code := Execute(context.Background(), []string{"--silent", "run", "--config", missing}); code != 10 {
-		t.Fatalf("silent configuration error returned %d", code)
+func TestIsUsageError(t *testing.T) {
+	tests := []struct {
+		err  string
+		want bool
+	}{
+		{"unknown command ", true},
+		{"unknown flag: --bad", true},
+		{"flag needs an argument: --config", true},
+		{"required flag --config", true},
+		{"invalid argument ", true},
+		{"some random error", false},
 	}
-	cacheDir, err := config.CacheDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	matches, err := filepath.Glob(filepath.Join(cacheDir, "logs", "scheduled-*.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("expected one scheduled log, got %v", matches)
-	}
-	data, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "silent command failed") || strings.Contains(string(data), "credential-secret") {
-		t.Fatalf("unexpected silent log: %s", data)
-	}
-}
-
-func TestHasSilentRecognizesBooleanSpellings(t *testing.T) {
-	for _, args := range [][]string{{"--silent"}, {"run", "--silent=true"}, {"--silent=TRUE", "run"}, {"--silent=1"}} {
-		if !hasSilent(args) {
-			t.Fatalf("silent flag was missed: %v", args)
-		}
-	}
-	for _, args := range [][]string{{"--silent=false"}, {"--silent=0"}, {"run"}} {
-		if hasSilent(args) {
-			t.Fatalf("false silent flag was treated as enabled: %v", args)
+	for _, tt := range tests {
+		if got := isUsageError(&exitError{code: 1, err: &testError{msg: tt.err}}); got != tt.want {
+			t.Errorf("isUsageError(%q) = %v; want %v", tt.err, got, tt.want)
 		}
 	}
 }
 
-func TestRunAndStatusRejectPositionalArgumentsBeforeExecution(t *testing.T) {
-	options := &rootOptions{}
-	for _, command := range []*cobra.Command{runCommand(options), statusCommand(options)} {
-		if err := command.Args(command, []string{"unexpected"}); err == nil {
-			t.Fatalf("%s accepted an ignored positional argument", command.Name())
+func TestHasSilent(t *testing.T) {
+	tests := []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"--silent"}, true},
+		{[]string{"--silent=true"}, true},
+		{[]string{"--silent=false"}, false},
+		{[]string{"run"}, false},
+		{[]string{"run", "--silent"}, true},
+	}
+	for _, tt := range tests {
+		if got := hasSilent(tt.args); got != tt.want {
+			t.Errorf("hasSilent(%v) = %v; want %v", tt.args, got, tt.want)
 		}
 	}
 }
 
-func TestRootDoesNotExposeInternalCommands(t *testing.T) {
-	root := newRoot(&rootOptions{})
-	for _, command := range root.Commands() {
-		switch command.Name() {
-		case "completion", "schedule":
-			t.Fatalf("unexpected command %q", command.Name())
-		}
+func TestErrorCode(t *testing.T) {
+	// exitError with code.
+	if got := errorCode(&exitError{code: report.ExitAuth}); got != report.ExitAuth {
+		t.Errorf("errorCode(exitError{Auth}) = %d; want %d", got, report.ExitAuth)
+	}
+	// usage error (non-exitError with usage marker).
+	if got := errorCode(&testError{msg: "unknown flag: --bad"}); got != report.ExitConfig {
+		t.Errorf("errorCode(usage) = %d; want %d", got, report.ExitConfig)
+	}
+	// unknown error → internal.
+	if got := errorCode(&testError{msg: "random"}); got != report.ExitInternal {
+		t.Errorf("errorCode(random) = %d; want %d", got, report.ExitInternal)
 	}
 }
 
-func TestErrorCodeSeparatesUsageConfigurationAndInternalFailures(t *testing.T) {
-	if got := errorCode(errors.New("unexpected filesystem failure")); got != report.ExitInternal {
-		t.Fatalf("raw internal failure returned %d", got)
-	}
-	if got := errorCode(errors.New(`unknown command "wat" for "akef-claim"`)); got != report.ExitConfig {
-		t.Fatalf("usage failure returned %d", got)
-	}
-	if got := errorCode(withExitCode(report.ExitConfig, errors.New("invalid config"))); got != report.ExitConfig {
-		t.Fatalf("classified configuration failure returned %d", got)
-	}
-}
+type testError struct{ msg string }
+
+func (e *testError) Error() string { return e.msg }

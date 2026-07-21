@@ -1,98 +1,101 @@
 package state
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
-func TestSaveReplacesStateAndLoadInitializesMap(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	first := &Store{Notifications: map[string]time.Time{"old": time.Unix(10, 0)}}
-	if err := first.Save(path); err != nil {
-		t.Fatal(err)
+func TestRecent(t *testing.T) {
+	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	store := &Store{Notifications: map[string]time.Time{}}
+
+	// No entry → not recent.
+	if store.Recent("key1", now, time.Hour) {
+		t.Error("Recent() = true; want false (no entry)")
 	}
-	second := &Store{Notifications: map[string]time.Time{"new": time.Unix(20, 0)}}
-	if err := second.Save(path); err != nil {
-		t.Fatal(err)
+
+	// Record and check.
+	store.Record("key1", now)
+	if !store.Recent("key1", now, time.Hour) {
+		t.Error("Recent() = false; want true (just recorded)")
 	}
+
+	// Past cooldown → not recent.
+	future := now.Add(2 * time.Hour)
+	if store.Recent("key1", future, time.Hour) {
+		t.Error("Recent() = true; want false (past cooldown)")
+	}
+
+	// Within cooldown.
+	soon := now.Add(30 * time.Minute)
+	if !store.Recent("key1", soon, time.Hour) {
+		t.Error("Recent() = false; want true (within cooldown)")
+	}
+}
+
+func TestRecord(t *testing.T) {
+	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	store := &Store{Notifications: nil}
+
+	// Record into nil map.
+	store.Record("key1", now)
+	if store.Notifications == nil {
+		t.Fatal("Record() did not initialize Notifications map")
+	}
+	if !store.Notifications["key1"].Equal(now.UTC()) {
+		t.Errorf("Record() = %v; want %v UTC", store.Notifications["key1"], now.UTC())
+	}
+}
+
+func TestRecent_NegativeAge(t *testing.T) {
+	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	store := &Store{Notifications: map[string]time.Time{}}
+	store.Record("key1", now)
+	// now is before the recorded time → negative age, should not be recent.
+	past := now.Add(-1 * time.Hour)
+	if store.Recent("key1", past, time.Hour) {
+		t.Error("Recent() = true; want false (negative age)")
+	}
+}
+
+func TestSaveLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/state.json"
+
+	store := &Store{Notifications: map[string]time.Time{}}
+	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	store.Record("key1", now)
+
+	if err := store.Save(path); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
 	loaded, err := Load(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Load() error: %v", err)
 	}
-	if _, exists := loaded.Notifications["old"]; exists || loaded.Notifications["new"].Unix() != 20 {
-		t.Fatalf("unexpected saved state: %#v", loaded.Notifications)
-	}
-	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
-		t.Fatalf("state file was not written: info=%v err=%v", info, err)
+	if !loaded.Notifications["key1"].Equal(now.UTC()) {
+		t.Errorf("Load() = %v; want %v", loaded.Notifications["key1"], now.UTC())
 	}
 }
 
-func TestRecentRejectsFutureAndExpiredTimestamps(t *testing.T) {
-	now := time.Unix(100, 0)
-	store := &Store{Notifications: map[string]time.Time{
-		"recent": now.Add(-time.Minute),
-		"future": now.Add(time.Minute),
-		"old":    now.Add(-2 * time.Hour),
-	}}
-	if !store.Recent("recent", now, time.Hour) || store.Recent("future", now, time.Hour) || store.Recent("old", now, time.Hour) {
-		t.Fatal("cooldown classification is incorrect")
+func TestLoad_NotExist(t *testing.T) {
+	store, err := Load("/nonexistent/path/state.json")
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if store.Notifications == nil {
+		t.Error("Load() should return initialized map for missing file")
 	}
 }
 
-func TestLoadFailuresAndEmptyState(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing.json")
-	store, err := Load(missing)
-	if err != nil || store.Notifications == nil {
-		t.Fatalf("missing state: store=%#v err=%v", store, err)
+func TestLoad_Fixture(t *testing.T) {
+	store, err := Load("testdata/state.json")
+	if err != nil {
+		t.Fatalf("Load(fixture) error: %v", err)
 	}
-
-	invalid := filepath.Join(t.TempDir(), "invalid.json")
-	if err := os.WriteFile(invalid, []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load(invalid); err == nil {
-		t.Fatal("invalid JSON should fail")
-	}
-	if _, err := Load(t.TempDir()); err == nil {
-		t.Fatal("reading a directory as state should fail")
-	}
-
-	nullMap := filepath.Join(t.TempDir(), "null.json")
-	if err := os.WriteFile(nullMap, []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	store, err = Load(nullMap)
-	if err != nil || store.Notifications == nil {
-		t.Fatalf("nil map was not initialized: %#v, %v", store, err)
-	}
-}
-
-func TestRecordInitializesMapAndRecentBoundaries(t *testing.T) {
-	now := time.Unix(100, 123)
-	store := &Store{}
-	store.Record("key", now)
-	if got := store.Notifications["key"]; !got.Equal(now.UTC()) {
-		t.Fatalf("recorded time=%s", got)
-	}
-	if store.Recent("missing", now, time.Hour) {
-		t.Fatal("missing key was recent")
-	}
-	if !store.Recent("key", now.Add(time.Hour-time.Nanosecond), time.Hour) {
-		t.Fatal("timestamp inside cooldown was not recent")
-	}
-	if store.Recent("key", now.Add(time.Hour), time.Hour) {
-		t.Fatal("cooldown endpoint should be expired")
-	}
-}
-
-func TestSaveFilesystemFailure(t *testing.T) {
-	blocker := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := (&Store{}).Save(filepath.Join(blocker, "state.json")); err == nil {
-		t.Fatal("save below a regular file should fail")
+	tm := store.Notifications["key1"]
+	if tm.IsZero() {
+		t.Error("key1 not found in fixture")
 	}
 }

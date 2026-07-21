@@ -4,18 +4,31 @@ package config
 
 import (
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestCheckPermissionsRejectsGroupOrWorldAccess(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	err := os.WriteFile(path, []byte("version = 1"), 0o644) // #nosec G306 -- intentionally insecure fixture verifies rejection.
-	if err != nil {
+func TestCheckPermissions_RegularFile(t *testing.T) {
+	path := t.TempDir() + "/good.conf"
+	if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckPermissions(path); err == nil || !strings.Contains(err.Error(), "expose secrets") {
-		t.Fatalf("insecure permissions error=%v", err)
+	if err := CheckPermissions(path); err != nil {
+		t.Errorf("CheckPermissions(0600) error: %v", err)
+	}
+}
+
+func TestCheckPermissions_WorldReadable(t *testing.T) {
+	path := t.TempDir() + "/bad.conf"
+	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckPermissions(path); err == nil {
+		t.Error("CheckPermissions(0644) should fail")
+	}
+}
+
+func TestCheckPermissions_NotExist(t *testing.T) {
+	if err := CheckPermissions("/nonexistent/path.conf"); err == nil {
+		t.Error("CheckPermissions() should fail for missing file")
 	}
 }

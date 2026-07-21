@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"time"
-
-	"github.com/hypercube-xyz/akef-skport-claim/internal/atomicfile"
 )
 
 type Store struct {
@@ -54,7 +52,7 @@ func (s *Store) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("encode state: %w", err)
 	}
-	if err := atomicfile.Write(path, data, 0o600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("save state: %w", err)
 	}
 	return nil

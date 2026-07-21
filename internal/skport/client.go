@@ -63,7 +63,13 @@ type Options struct {
 	UserAgent string
 }
 
-type Client struct {
+type Client interface {
+	Refresh(context.Context) (string, error)
+	Status(context.Context, string) (AttendanceResponse, error)
+	ClaimOnce(context.Context, string) (ClaimResponse, error)
+}
+
+type API struct {
 	account        config.Account
 	baseURL        string
 	http           *http.Client
@@ -75,7 +81,7 @@ type Client struct {
 	claimAttempted bool
 }
 
-func New(account config.Account, timeout time.Duration, options Options) *Client {
+func New(account config.Account, timeout time.Duration, options Options) *API {
 	baseURL := options.BaseURL
 	if baseURL == "" {
 		baseURL = BaseURL
@@ -110,10 +116,10 @@ func New(account config.Account, timeout time.Duration, options Options) *Client
 	if userAgent == "" {
 		userAgent = "akef-claim/" + version.Version
 	}
-	return &Client{account: account, baseURL: strings.TrimRight(baseURL, "/"), http: httpClient, now: now, sleep: sleep, userAgent: userAgent}
+	return &API{account: account, baseURL: strings.TrimRight(baseURL, "/"), http: httpClient, now: now, sleep: sleep, userAgent: userAgent}
 }
 
-func (c *Client) Refresh(ctx context.Context) (string, error) {
+func (c *API) Refresh(ctx context.Context) (string, error) {
 	response, err := retryJSON[RefreshResponse](c, ctx, http.MethodGet, RefreshPath, func() http.Header { return commonHeaders(c.account) }, "", 2)
 	if err != nil {
 		return "", err
@@ -131,12 +137,12 @@ func (c *Client) Refresh(ctx context.Context) (string, error) {
 	return response.Data.Token, nil
 }
 
-func (c *Client) Status(ctx context.Context, token string) (AttendanceResponse, error) {
+func (c *API) Status(ctx context.Context, token string) (AttendanceResponse, error) {
 	headers := func() http.Header { return signedHeaders(c.account, token, AttendancePath, "", c.now()) }
 	return retryJSON[AttendanceResponse](c, ctx, http.MethodGet, AttendancePath, headers, "", 1)
 }
 
-func (c *Client) ClaimOnce(ctx context.Context, token string) (ClaimResponse, error) {
+func (c *API) ClaimOnce(ctx context.Context, token string) (ClaimResponse, error) {
 	var response ClaimResponse
 	c.mu.Lock()
 	if c.claimAttempted {
@@ -153,7 +159,7 @@ func (c *Client) ClaimOnce(ctx context.Context, token string) (ClaimResponse, er
 // retryJSON decodes every response into a fresh value. A failed json.Unmarshal
 // may partially populate its target, so reusing a target across attempts could
 // leak data from a failed response into a later successful one.
-func retryJSON[T any](c *Client, ctx context.Context, method, path string, headers func() http.Header, body string, reservedRequests int) (T, error) {
+func retryJSON[T any](c *API, ctx context.Context, method, path string, headers func() http.Header, body string, reservedRequests int) (T, error) {
 	var zero T
 	delay := time.Second
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -178,13 +184,13 @@ func retryJSON[T any](c *Client, ctx context.Context, method, path string, heade
 	return zero, &Error{Kind: ErrorInternal, Op: path, Err: errors.New("retry loop exited unexpectedly")}
 }
 
-func (c *Client) remainingRequests() int {
+func (c *API) remainingRequests() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return requestLimit - c.used
 }
 
-func (c *Client) do(ctx context.Context, method, path string, headers http.Header, body string, claim bool, target any) error {
+func (c *API) do(ctx context.Context, method, path string, headers http.Header, body string, claim bool, target any) error {
 	c.mu.Lock()
 	if c.used >= requestLimit {
 		c.mu.Unlock()

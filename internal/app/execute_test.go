@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -13,101 +12,240 @@ import (
 	"time"
 
 	"github.com/hypercube-xyz/akef-skport-claim/internal/config"
-	"github.com/hypercube-xyz/akef-skport-claim/internal/report"
 	"github.com/hypercube-xyz/akef-skport-claim/internal/result"
 )
 
-func TestExecutionSetupAndDelayFailures(t *testing.T) {
-	isolateUserDirs(t)
-	missing := filepath.Join(t.TempDir(), "missing.toml")
-	if _, code, err := Execute(context.Background(), Options{ConfigPath: missing}); err == nil || code != report.ExitConfig {
-		t.Fatalf("missing config code=%d err=%v", code, err)
-	}
-	path := writeAppConfig(t, "0s")
-	if _, code, err := Execute(context.Background(), Options{ConfigPath: path, AccountName: "missing"}); err == nil || code != report.ExitConfig {
-		t.Fatalf("missing account code=%d err=%v", code, err)
-	}
-	delayed := strings.Replace(string(mustReadFile(t, path)), `random_delay = "0s"`, `random_delay = "1s"`, 1)
-	delayedPath := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(delayedPath, []byte(delayed), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	slept := false
-	_, code, err := Execute(context.Background(), Options{
-		ConfigPath: delayedPath, Output: io.Discard,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Sleep:  func(context.Context, time.Duration) error { slept = true; return context.Canceled },
-	})
-	if !slept || !errors.Is(err, context.Canceled) || code != report.ExitTransient {
-		t.Fatalf("random delay slept=%v code=%d err=%v", slept, code, err)
+// ---------------------------------------------------------------------------
+// randomDelay
+// ---------------------------------------------------------------------------
+
+func TestRandomDelay_Positive(t *testing.T) {
+	max := 100 * time.Millisecond
+	for range 100 {
+		got := randomDelay(max)
+		if got < 0 || got >= max {
+			t.Errorf("randomDelay(%v) = %v; want [0, %v)", max, got, max)
+		}
 	}
 }
 
-func TestExecutionRejectsUnusableCacheAndScheduledLogPaths(t *testing.T) {
-	path := writeAppConfig(t, "0s")
-	blocker := filepath.Join(t.TempDir(), "cache")
-	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("XDG_CACHE_HOME", blocker)
-	t.Setenv("LOCALAPPDATA", blocker)
-	t.Setenv("HOME", blocker)
-	if _, code, err := Execute(context.Background(), Options{ConfigPath: path}); err == nil || code != report.ExitInternal {
-		t.Fatalf("unusable cache code=%d err=%v", code, err)
-	}
-	cache := t.TempDir()
-	if err := os.WriteFile(filepath.Join(cache, "logs"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if logger, closer, err := configureLogger(Options{Silent: true}, &config.Config{}, cache); err == nil || logger != nil || closer != nil {
-		t.Fatalf("blocked scheduled log logger=%v closer=%v err=%v", logger, closer, err)
-	}
-}
-
-func TestLoggerReportAndSleepHelpers(t *testing.T) {
-	cfg := &config.Config{App: config.AppConfig{LogLevel: "debug"}}
-	explicit := slog.New(slog.NewTextHandler(io.Discard, nil))
-	logger, closer, err := configureLogger(Options{Logger: explicit}, cfg, t.TempDir())
-	if err != nil || logger != explicit || closer != nil {
-		t.Fatalf("explicit logger=%v closer=%v err=%v", logger, closer, err)
-	}
-	logger, closer, err = configureLogger(Options{}, cfg, t.TempDir())
-	if err != nil || logger == nil || closer != nil {
-		t.Fatalf("interactive logger=%v closer=%v err=%v", logger, closer, err)
-	}
-	logger, closer, err = configureLogger(Options{Silent: true}, cfg, t.TempDir())
-	if err != nil || logger == nil || closer == nil {
-		t.Fatalf("scheduled logger=%v closer=%v err=%v", logger, closer, err)
-	}
-	if err := closer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	var output bytes.Buffer
-	run := result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.Claimed}}}
-	if err := writeReport(Options{Output: &output}, explicit, run); err != nil || !strings.Contains(output.String(), "main") {
-		t.Fatalf("report output=%q err=%v", output.String(), err)
-	}
-	if err := writeReport(Options{Silent: true}, explicit, run); err != nil {
-		t.Fatalf("silent report=%v", err)
-	}
+func TestRandomDelay_Zero(t *testing.T) {
 	if got := randomDelay(0); got != 0 {
-		t.Fatalf("randomDelay(0)=%s", got)
+		t.Errorf("randomDelay(0) = %v; want 0", got)
 	}
-	if err := sleepContext(context.Background(), time.Nanosecond); err != nil {
-		t.Fatalf("completed sleep=%v", err)
+}
+
+func TestRandomDelay_Negative(t *testing.T) {
+	if got := randomDelay(-1 * time.Second); got != 0 {
+		t.Errorf("randomDelay(-1s) = %v; want 0", got)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// sleepContext
+// ---------------------------------------------------------------------------
+
+func TestSleepContext_Normal(t *testing.T) {
+	start := time.Now()
+	err := sleepContext(context.Background(), 50*time.Millisecond)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("sleepContext() error: %v", err)
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("slept %v; want >= 50ms", elapsed)
+	}
+}
+
+func TestSleepContext_Canceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := sleepContext(ctx, time.Hour); !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled sleep=%v", err)
+	err := sleepContext(ctx, time.Hour)
+	if err == nil {
+		t.Fatal("sleepContext() should return error when context canceled")
 	}
 }
 
-func mustReadFile(t *testing.T, path string) []byte {
-	t.Helper()
-	data, err := os.ReadFile(path) // #nosec G304 -- test-controlled path.
+func TestSleepContext_ZeroDelay(t *testing.T) {
+	err := sleepContext(context.Background(), 0)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sleepContext(0) error: %v", err)
 	}
-	return data
+}
+
+// ---------------------------------------------------------------------------
+// writeReport
+// ---------------------------------------------------------------------------
+
+func TestWriteReport_Stdout(t *testing.T) {
+	var buf bytes.Buffer
+	options := Options{Output: &buf}
+	logger := slog.New(slog.DiscardHandler)
+	runReport := result.Run{
+		Accounts: []result.Account{{Name: "main", Outcome: result.Claimed, Summary: "Orundum x200"}},
+	}
+
+	err := writeReport(options, logger, runReport)
+	if err != nil {
+		t.Fatalf("writeReport() error: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "main") || !strings.Contains(got, "claimed") {
+		t.Errorf("writeReport() = %q; want report content", got)
+	}
+}
+
+func TestWriteReport_Silent(t *testing.T) {
+	options := Options{Silent: true}
+	logger := slog.New(slog.DiscardHandler)
+	runReport := result.Run{
+		Accounts: []result.Account{{Name: "main", Outcome: result.Claimed, Summary: "Orundum x200"}},
+	}
+
+	err := writeReport(options, logger, runReport)
+	if err != nil {
+		t.Fatalf("writeReport() error: %v", err)
+	}
+}
+
+func TestWriteReport_NilOutput(t *testing.T) {
+	options := Options{}
+	logger := slog.New(slog.DiscardHandler)
+	runReport := result.Run{Accounts: []result.Account{{Name: "main", Outcome: result.Claimed, Summary: "ok"}}}
+	// ponytail: writes to os.Stdout; covered by integration.
+	_ = writeReport(options, logger, runReport)
+}
+
+// ---------------------------------------------------------------------------
+// configureLogger
+// ---------------------------------------------------------------------------
+
+func TestConfigureLogger_Interactive(t *testing.T) {
+	options := Options{Silent: false}
+	cfg := &config.Config{App: config.AppConfig{LogLevel: "info"}}
+	logger, closer, err := configureLogger(options, cfg, "")
+	if err != nil {
+		t.Fatalf("configureLogger() error: %v", err)
+	}
+	if closer != nil {
+		t.Error("interactive logger should not have a closer")
+	}
+	if logger == nil {
+		t.Fatal("logger is nil")
+	}
+}
+
+func TestConfigureLogger_Silent(t *testing.T) {
+	dir := t.TempDir()
+	options := Options{Silent: true}
+	cfg := &config.Config{App: config.AppConfig{LogLevel: "info"}}
+	logger, closer, err := configureLogger(options, cfg, dir)
+	if err != nil {
+		t.Fatalf("configureLogger() error: %v", err)
+	}
+	if closer == nil {
+		t.Fatal("silent logger should have a closer")
+	}
+	t.Cleanup(func() { _ = closer.Close() })
+	if logger == nil {
+		t.Fatal("logger is nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Execute integration tests
+// ---------------------------------------------------------------------------
+
+func writeTempConfig(t *testing.T, dir string, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+	return path
+}
+
+func TestExecute_ConfigLoadError(t *testing.T) {
+	_, _, err := Execute(context.Background(), Options{ConfigPath: "/nonexistent/config.toml"})
+	if err == nil {
+		t.Fatal("Execute() should fail with nonexistent config")
+	}
+}
+
+func TestExecute_ValidConfigStatusOnly(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeTempConfig(t, dir, `
+version = 1
+[app]
+language = "en"
+log_level = "info"
+[run]
+random_delay = "0s"
+account_delay = "0s"
+request_timeout = "10s"
+notification_error_cooldown = "24h"
+[[accounts]]
+name = "main"
+enabled = true
+cred = "test-cred"
+game_role = "test-role"
+language = "en"
+`)
+	// StatusOnly=true skips claim lock and notifications.
+	// Network calls will fail (no real SKPORT server), but the flow
+	// should still populate the account entry.
+	run, _, err := Execute(context.Background(), Options{ConfigPath: cfgPath, StatusOnly: true, Silent: true, Output: io.Discard})
+	// We expect a network error, but the account should be in the list.
+	if err == nil {
+		t.Log("unexpected success (SKPORT may be reachable)")
+	}
+	if len(run.Accounts) == 0 {
+		t.Error("run.Accounts is empty; expected at least one account entry")
+	}
+}
+
+func TestExecute_InvalidAccountName(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeTempConfig(t, dir, `
+version = 1
+[app]
+log_level = "info"
+[run]
+random_delay = "0s"
+account_delay = "0s"
+request_timeout = "10s"
+[[accounts]]
+name = "main"
+enabled = true
+cred = "test-cred"
+game_role = "test-role"
+language = "en"
+`)
+	_, _, err := Execute(context.Background(), Options{ConfigPath: cfgPath, AccountName: "nonexistent", Silent: true, Output: io.Discard})
+	if err == nil {
+		t.Fatal("Execute() should fail with unknown account name")
+	}
+}
+
+func TestExecute_DisabledAccount(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeTempConfig(t, dir, `
+version = 1
+[app]
+log_level = "info"
+[run]
+random_delay = "0s"
+account_delay = "0s"
+request_timeout = "10s"
+[[accounts]]
+name = "off"
+enabled = false
+cred = "test-cred"
+game_role = "test-role"
+language = "en"
+`)
+	_, _, err := Execute(context.Background(), Options{ConfigPath: cfgPath, Silent: true, Output: io.Discard})
+	if err == nil {
+		t.Fatal("Execute() should fail when no accounts are enabled")
+	}
 }

@@ -104,10 +104,10 @@ func (r AttendanceResponse) State() AttendanceState {
 		// Some observed and legacy response shapes expose state directly on data.
 		evaluate(object)
 		for _, nested := range object {
-			walkAttendanceItems(nested, evaluate)
+			walkJSON(nested, evaluate)
 		}
 	} else {
-		walkAttendanceItems(root, evaluate)
+		walkJSON(root, evaluate)
 	}
 
 	switch {
@@ -213,40 +213,38 @@ func directBool(object map[string]any, keys map[string]struct{}) (bool, bool) {
 	return false, knownFalse
 }
 
-func walkAttendanceItems(value any, visit func(map[string]any)) {
+func walkJSON(value any, visit func(map[string]any)) {
 	switch typed := value.(type) {
 	case map[string]any:
-		if awardID, ok := typed["awardId"].(string); ok && awardID != "" {
-			visit(typed)
-		}
+		visit(typed)
 		for _, nested := range typed {
-			walkAttendanceItems(nested, visit)
+			walkJSON(nested, visit)
 		}
 	case []any:
 		for _, nested := range typed {
-			walkAttendanceItems(nested, visit)
+			walkJSON(nested, visit)
 		}
 	}
 }
 
+func walkAttendanceItems(value any, visit func(map[string]any)) {
+	walkJSON(value, func(obj map[string]any) {
+		if awardID, ok := obj["awardId"].(string); ok && awardID != "" {
+			visit(obj)
+		}
+	})
+}
+
 func collectAvailableIDs(value any, ids map[string]bool) {
-	switch typed := value.(type) {
-	case map[string]any:
-		available, availableKnown := directBool(typed, availableKeys)
-		done, doneKnown := directBool(typed, doneKeys)
+	walkJSON(value, func(obj map[string]any) {
+		available, availableKnown := directBool(obj, availableKeys)
+		done, doneKnown := directBool(obj, doneKeys)
 		if availableKnown && available && (!doneKnown || !done) {
-			if id, ok := typed["awardId"].(string); ok {
+			if id, ok := obj["awardId"].(string); ok {
 				ids[id] = true
 			}
 		}
-		for _, nested := range typed {
-			collectAvailableIDs(nested, ids)
-		}
-	case []any:
-		for _, nested := range typed {
-			collectAvailableIDs(nested, ids)
-		}
-	}
+	})
 }
 
 func resourceInfoMap(value any) map[string]any {

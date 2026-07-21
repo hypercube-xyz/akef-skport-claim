@@ -1,11 +1,8 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
-
-	"github.com/hypercube-xyz/akef-skport-claim/internal/atomicfile"
 )
 
 func Init(path string, force bool) (string, error) {
@@ -14,16 +11,16 @@ func Init(path string, force bool) (string, error) {
 		return "", err
 	}
 	if force {
-		if err := atomicfile.Write(resolved, []byte(Example), 0o600); err != nil {
+		if err := os.WriteFile(resolved, []byte(Example), 0o600); err != nil {
 			return "", fmt.Errorf("initialize config: %w", err)
 		}
 		return resolved, nil
 	}
 
-	if err := atomicfile.WriteNew(resolved, []byte(Example), 0o600); err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return "", fmt.Errorf("config already exists at %s (use --force to replace it)", resolved)
-		}
+	if _, err := os.Stat(resolved); err == nil {
+		return "", fmt.Errorf("config already exists at %s (use --force to replace it)", resolved)
+	}
+	if err := os.WriteFile(resolved, []byte(Example), 0o600); err != nil {
 		return "", fmt.Errorf("initialize config: %w", err)
 	}
 	return resolved, nil
